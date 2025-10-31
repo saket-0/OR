@@ -1,12 +1,13 @@
-# FILE 3: optimization.py
+# FILE 3: optimization.py (NEW - using PuLP)
 
-from scipy.optimize import linprog
+import pulp
 
 def calculate_bid_price(forecast: dict, prices: dict, capacity: int) -> float:
     """
     Calculates the optimal bid price using a Deterministic Linear Program (DLP).
 
     The bid price is the shadow price (dual variable) of the capacity constraint.
+    This version uses the PuLP library for stability.
 
     Args:
         forecast: The demand forecast from the forecasting module.
@@ -16,56 +17,53 @@ def calculate_bid_price(forecast: dict, prices: dict, capacity: int) -> float:
     Returns:
         The single optimal bid price (float).
     """
-    print("Step 3: Optimizing to find bid price...")
+    print("Step 3: Optimizing to find bid price (using PuLP)...")
     
-    # We have 2 decision variables: x_urgent, x_leisure
-    # We use the demand means (mu) from the forecast
+    # --- 1. Get Forecasts and Prices ---
     D_urgent = forecast['urgent']['mu']
     D_leisure = forecast['leisure']['mu']
     
     P_urgent = prices['urgent']
     P_leisure = prices['leisure']
 
-    # --- LP Formulation ---
-    # Objective: Maximize (P_urgent * x_urgent) + (P_leisure * x_leisure)
-    # scipy.optimize.linprog minimizes, so we flip the signs.
-    c = [-P_urgent, -P_leisure]
+    # --- 2. Create the LP Problem ---
+    # We want to MAXIMIZE revenue
+    prob = pulp.LpProblem("Bid_Price_Problem", pulp.LpMaximize)
 
-    # Constraints (A_ub * x <= b_ub):
-    # 1. x_urgent + x_leisure <= capacity
-    # 2. x_urgent             <= D_urgent
-    # 3.           x_leisure  <= D_leisure
+    # --- 3. Define Decision Variables ---
+    # How many of each ticket to sell?
+    x_urgent = pulp.LpVariable("Urgent_Tickets", lowBound=0, cat='Continuous')
+    x_leisure = pulp.LpVariable("Leisure_Tickets", lowBound=0, cat='Continuous')
+
+    # --- 4. Define Objective Function ---
+    # Maximize (P_urgent * x_urgent) + (P_leisure * x_leisure)
+    prob += (P_urgent * x_urgent) + (P_leisure * x_leisure), "Total_Revenue"
+
+    # --- 5. Define Constraints ---
+    # We must give the capacity constraint a name to get its dual price
+    prob += (x_urgent + x_leisure <= capacity, "Capacity_Constraint")
+    prob += (x_urgent <= D_urgent, "Urgent_Demand_Constraint")
+    prob += (x_leisure <= D_leisure, "Leisure_Demand_Constraint")
+
+    # --- 6. Solve the LP ---
+    # The default CBC solver is excellent
+    prob.solve()
+
+    # Check if the solution is optimal
+    if pulp.LpStatus[prob.status] != 'Optimal':
+        raise Exception(f"LP solver failed to find an optimal solution. Status: {pulp.LpStatus[prob.status]}")
+
+    # --- 7. Get the Bid Price (The Dual Variable) ---
+    # This is the most stable way:
+    # 1. Create a dictionary of all constraints
+    constraints = prob.constraints
     
-    A_ub = [
-        [1, 1],  # Capacity constraint
-        [1, 0],  # Urgent demand constraint
-        [0, 1]   # Leisure demand constraint
-    ]
-    
-    b_ub = [capacity, D_urgent, D_leisure]
-    
-    # Bounds (x >= 0)
-    bounds = [(0, None), (0, None)]
+    # 2. Get the dual value (pi) from the constraint we named
+    bid_price = constraints["Capacity_Constraint"].pi
 
-    # --- THIS IS THE FIX ---
-    # Solve the LP using the 'interior-point' method, which is highly stable
-    # and reliably returns dual variables.
-    result = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='interior-point')
-
-    if not result.success:
-        raise Exception(f"Linear Programming optimization failed: {result.message}")
-
-    # The bid price is the shadow price (dual) of the *first* constraint (capacity).
-    # For 'interior-point', this is stored in 'result.ineqlin'
-    # We take its absolute value as linprog's duals for '<=' constraints are negative.
-    
-    # Add a check in case ineqlin is missing, though it shouldn't be.
-    if not hasattr(result, 'ineqlin') or len(result.ineqlin) == 0:
-        print("Warning: Solver did not return dual variables. Defaulting bid price to 0.")
-        print(f"Full solver result: {result}")
-        return 0.0
-
-    bid_price = abs(result.ineqlin[0])
+    # In PuLP, duals from a maximization problem with a '<=' constraint
+    # are negative, so we must take the absolute value.
+    bid_price = abs(bid_price)
     
     print(f"Optimization complete. Optimal Bid Price: ₹{bid_price:.2f}")
     return bid_price
