@@ -1,4 +1,4 @@
-# FILE 0: factor_calculator.py (NEW)
+# FILE 0: factor_calculator.py (FIXED)
 
 import numpy as np
 from unconstraining import unconstrain_demand
@@ -36,33 +36,37 @@ def calculate_demand_factors(historical_data: list, capacity: int) -> dict:
     for i, record in enumerate(historical_data):
         record['true_demand'] = true_demand_list[i]
 
-    # 3. Calculate Base Demand (non-holiday, weekday)
+    # --- (FIXED LOGIC) ---
+    # 3. Calculate an overall average to use as a safe fallback
+    #    (Use 1.0 to avoid division by zero if true_demand_list is empty)
+    overall_mu = np.mean(true_demand_list) if true_demand_list else 1.0
+
+    # 4. Calculate Base Demand (non-holiday, weekday)
     normal_demand = [
         rec['true_demand'] for rec in historical_data
         if not rec['is_holiday'] and rec['day_of_week'] not in ['Fri', 'Sun']
     ]
-    # Avoid division by zero if data is sparse
-    base_mu = np.mean(normal_demand) if normal_demand else 200 # Fallback
+    # Use 'overall_mu' as the fallback instead of 200
+    base_mu = np.mean(normal_demand) if normal_demand else overall_mu
     
-    # 4. Calculate Holiday Demand
+    # 5. Calculate Holiday Demand
     holiday_demand = [
         rec['true_demand'] for rec in historical_data if rec['is_holiday']
     ]
+    # Use 'base_mu' as fallback, so factor defaults to 1.0
     avg_holiday_mu = np.mean(holiday_demand) if holiday_demand else base_mu
     
-    # 5. Calculate Weekend Demand
+    # 6. Calculate Weekend Demand
     weekend_demand = [
         rec['true_demand'] for rec in historical_data 
         if rec['day_of_week'] in ['Fri', 'Sun'] and not rec['is_holiday'] # Avoid double-counting
     ]
     avg_weekend_mu = np.mean(weekend_demand) if weekend_demand else base_mu
+    # --- (END OF FIX) ---
 
-    # 6. Calculate Factors
+    # 7. Calculate Factors
     factor_holiday = avg_holiday_mu / base_mu
     factor_weekend = avg_weekend_mu / base_mu
-
-    # (Optional) We can even make the leisure/urgent split data-driven
-    # For this example, we'll keep it simple.
     
     factors = {
         'base_mu': base_mu,
