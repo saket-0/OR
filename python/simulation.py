@@ -1,4 +1,4 @@
-# FILE 7: simulation.py (UPDATED with multiple booking curves)
+# FILE 7: simulation.py (UPDATED for Stochastic/Quiet Mode)
 
 import numpy as np
 import config
@@ -14,28 +14,37 @@ def _get_or_initialize_key(data_dict, key, default_val=0):
     return data_dict[key]
 
 
-def run_dynamic_simulation():
+def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = False): # <-- (NEW)
     """
     (UPDATED) Simulates the 120-day booking window using
     a 2-step static allocation and quota-specific booking curves.
+    
+    (NEW) Args:
+        stochastic_mode: Passed to engine.get_quota_forecasts()
+        quiet_mode: Suppresses all print output for fast simulation runs.
     """
     
     # --- 1. OFFLINE PHASE: Run Forecasts ---
-    all_quota_forecasts = get_quota_forecasts()
+    # Pass the stochastic_mode flag to the forecasting engine
+    all_quota_forecasts = get_quota_forecasts(stochastic_mode=stochastic_mode)
     
     # --- 2. OFFLINE PHASE: Run Master Allocation (Quota vs Quota) ---
     master_allocations = {}
-    print("\n--- RUNNING MASTER ALLOCATION ENGINE (Quota vs. Quota) ---")
+    if not quiet_mode:
+        print("\n--- RUNNING MASTER ALLOCATION ENGINE (Quota vs. Quota) ---")
     for tc in config.TRAVEL_CLASSES:
         master_allocations[tc] = partition_capacity_by_quota(
             all_quota_forecasts[tc],
-            config.CAPACITY[tc]
+            config.CAPACITY[tc],
+            tc # <-- (NEW) Pass travel class for policy constraints
         )
-    print(f"\n--- MASTER ALLOCATIONS COMPLETE: {master_allocations} ---")
+    if not quiet_mode:
+        print(f"\n--- MASTER ALLOCATIONS COMPLETE: {master_allocations} ---")
     
     # --- 3. (NEW) OFFLINE PHASE: Run Inner Allocation (Bucket vs Bucket) ---
     final_bucket_allocations = {}
-    print("\n--- RUNNING INNER ALLOCATION ENGINE (Bucket vs. Bucket) ---")
+    if not quiet_mode:
+        print("\n--- RUNNING INNER ALLOCATION ENGINE (Bucket vs. Bucket) ---")
     for tc in config.TRAVEL_CLASSES:
         final_bucket_allocations[tc] = {}
         for q_code, q_config in config.QUOTA_CONFIG.items():
@@ -58,11 +67,13 @@ def run_dynamic_simulation():
             elif q_config['type'] == 'FLAT':
                 final_bucket_allocations[tc][f"{q_code}_Bucket_0_Allocation"] = quota_total_allocation
     
-    print(f"\n--- FINAL BUCKET ALLOCATIONS COMPLETE: {final_bucket_allocations} ---")
+    if not quiet_mode:
+        print(f"\n--- FINAL BUCKET ALLOCATIONS COMPLETE: {final_bucket_allocations} ---")
 
     
     # --- 4. ONLINE PHASE: Initialize Simulation ---
-    print(f"\n--- RUNNING *DYNAMIC* ONLINE SIMULATION ({config.BOOKING_WINDOW_DAYS} Days) ---")
+    if not quiet_mode:
+        print(f"\n--- RUNNING *DYNAMIC* ONLINE SIMULATION ({config.BOOKING_WINDOW_DAYS} Days) ---")
     
     total_revenue = 0
     seats_sold = {}
@@ -76,7 +87,8 @@ def run_dynamic_simulation():
         
     # --- 5. Main Simulation Loop (Day 120 down to Day 1) ---
     for day in range(config.BOOKING_WINDOW_DAYS, 0, -1):
-        print(f"\n================ DAY {day} (Booking Window Open) ================")
+        if not quiet_mode:
+            print(f"\n================ DAY {day} (Booking Window Open) ================")
         
         for tc in config.TRAVEL_CLASSES:
             class_bucket_allocs = final_bucket_allocations[tc]
@@ -117,7 +129,8 @@ def run_dynamic_simulation():
                 
                 if daily_arrivals == 0: continue
                 
-                print(f"  Simulating {daily_arrivals} arrivals for Class {tc}, Quota {q_code}...")
+                if not quiet_mode:
+                    print(f"  Simulating {daily_arrivals} arrivals for Class {tc}, Quota {q_code}...")
                 _get_or_initialize_key(bookings_rejected[tc], q_code, 0)
                 
                 price_config = q_config['price_config'][tc]
@@ -159,22 +172,26 @@ def run_dynamic_simulation():
                     if not sold_ticket:
                         bookings_rejected[tc][q_code] += 1
 
-    print("\n================ SIMULATION COMPLETE ================")
-    print(f"\nTotal Revenue (All Classes): ₹{total_revenue:,}")
-    
-    print("\n--- FINAL CLASS BREAKDOWN ---")
-    for tc in config.TRAVEL_CLASSES:
-        total_sold = sum(seats_sold[tc].values())
-        print(f"\nClass: {tc}")
-        print(f"  Seats Sold: {total_sold} / {config.CAPACITY[tc]}")
-        print(f"  Master Allocation was: {master_allocations[tc]}")
-
-        print("\n  Customer Segment Analysis (by Quota-Bucket):")
-        for sold_key, num_accepted in sorted(bookings_accepted[tc].items()):
-            if num_accepted > 0:
-                print(f"  {sold_key}: {num_accepted} accepted")
+    if not quiet_mode:
+        print("\n================ SIMULATION COMPLETE ================")
+        print(f"\nTotal Revenue (All Classes): ₹{total_revenue:,}")
         
-        print("\n  Total Rejected (by Quota):")
-        for q_code, num_rejected in sorted(bookings_rejected[tc].items()):
-            if num_rejected > 0:
-                print(f"  {q_code}: {num_rejected} rejected")
+        print("\n--- FINAL CLASS BREAKDOWN ---")
+        for tc in config.TRAVEL_CLASSES:
+            total_sold = sum(seats_sold[tc].values())
+            print(f"\nClass: {tc}")
+            print(f"  Seats Sold: {total_sold} / {config.CAPACITY[tc]}")
+            print(f"  Master Allocation was: {master_allocations[tc]}")
+
+            print("\n  Customer Segment Analysis (by Quota-Bucket):")
+            for sold_key, num_accepted in sorted(bookings_accepted[tc].items()):
+                if num_accepted > 0:
+                    print(f"  {sold_key}: {num_accepted} accepted")
+            
+            print("\n  Total Rejected (by Quota):")
+            for q_code, num_rejected in sorted(bookings_rejected[tc].items()):
+                if num_rejected > 0:
+                    print(f"  {q_code}: {num_rejected} rejected")
+    
+    # --- (NEW) Return the final revenue for Monte Carlo analysis ---
+    return total_revenue

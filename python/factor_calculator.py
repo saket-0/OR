@@ -1,9 +1,9 @@
-# FILE 0: factor_calculator.py (FIXED)
+# FILE 0: factor_calculator.py (FIXED & UPDATED for Quiet Mode)
 
 import numpy as np
 from unconstraining import unconstrain_demand
 
-def get_unconstrained_demand(historical_data: list, capacity: int) -> list:
+def get_unconstrained_demand(historical_data: list, capacity: int, quiet: bool = False) -> list: # <-- (NEW)
     """
     Helper function to run unconstraining on the new detailed data format.
     """
@@ -16,10 +16,11 @@ def get_unconstrained_demand(historical_data: list, capacity: int) -> list:
         }
         for rec in historical_data
     ]
-    return unconstrain_demand(simple_sales_data, capacity)
+    # Pass the quiet flag down
+    return unconstrain_demand(simple_sales_data, capacity, quiet=quiet)
 
 
-def calculate_demand_factors(historical_data: list, capacity: int) -> dict:
+def calculate_demand_factors(historical_data: list, capacity: int, quiet: bool = False) -> dict: # <-- (NEW)
     """
     Calculates demand factors by comparing "normal" days to "special" days.
     
@@ -27,10 +28,11 @@ def calculate_demand_factors(historical_data: list, capacity: int) -> dict:
         A dict of multiplicative factors, e.g.:
         {'holiday': 1.45, 'weekend': 1.12, 'base_leisure_split': 0.68}
     """
-    print("--- Calculating Demand Factors from Historical Data ---")
+    if not quiet:
+        print("--- Calculating Demand Factors from Historical Data ---")
     
     # 1. Get true demand for all historical runs
-    true_demand_list = get_unconstrained_demand(historical_data, capacity)
+    true_demand_list = get_unconstrained_demand(historical_data, capacity, quiet=quiet)
     
     # 2. Add the 'true_demand' to our detailed records
     for i, record in enumerate(historical_data):
@@ -65,8 +67,8 @@ def calculate_demand_factors(historical_data: list, capacity: int) -> dict:
     # --- (END OF FIX) ---
 
     # 7. Calculate Factors
-    factor_holiday = avg_holiday_mu / base_mu
-    factor_weekend = avg_weekend_mu / base_mu
+    factor_holiday = (avg_holiday_mu / base_mu) if base_mu > 0 else 1.0
+    factor_weekend = (avg_weekend_mu / base_mu) if base_mu > 0 else 1.0
     
     factors = {
         'base_mu': base_mu,
@@ -74,5 +76,6 @@ def calculate_demand_factors(historical_data: list, capacity: int) -> dict:
         'factor_weekend': factor_weekend
     }
     
-    print(f"Factors calculated: {factors}")
+    if not quiet:
+        print(f"Factors calculated: {factors}")
     return factors

@@ -1,4 +1,4 @@
-# FILE 1: unconstraining.py (REFINED HEURISTIC)
+# FILE 1: unconstraining.py (REFINED HEURISTIC & Quiet Mode)
 
 import pandas as pd
 
@@ -8,7 +8,7 @@ import pandas as pd
 # for compounded unconstrained demand.
 DAILY_SPILL_FACTOR = 0.08 
 
-def unconstrain_demand(historical_sales: list, capacity: int) -> list:
+def unconstrain_demand(historical_sales: list, capacity: int, quiet: bool = False) -> list: # <-- (NEW)
     """
     Estimates true (unconstrained) demand from historical sales data.
 
@@ -20,11 +20,13 @@ def unconstrain_demand(historical_sales: list, capacity: int) -> list:
                           [{'train_id': 1, 'days_before_departure': 3, 'total_sold': 200},
                            {'train_id': 2, 'days_before_departure': 0, 'total_sold': 180}]
         capacity: The total seat capacity (e.g., 200).
+        quiet: If True, suppresses print statements.
 
     Returns:
         A list of unconstrained demand estimates.
     """
-    print("Step 1: Unconstraining historical data (Refined)...")
+    if not quiet:
+        print("Step 1: Unconstraining historical data (Refined)...")
     unconstrained_estimates = []
     
     for record in historical_sales:
@@ -43,6 +45,7 @@ def unconstrain_demand(historical_sales: list, capacity: int) -> list:
             estimated_demand = int(sold * early_booking_factor)
             unconstrained_estimates.append(estimated_demand)
             # -------------------------
-            
-    print(f"Unconstrained estimates: {unconstrained_estimates}")
+    
+    if not quiet:
+        print(f"Unconstrained estimates: {unconstrained_estimates}")
     return unconstrained_estimates

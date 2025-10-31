@@ -1,6 +1,7 @@
-# FILE 4: engine.py (UPDATED for 2-Step Allocation)
+# FILE 4: engine.py (UPDATED for Stochastic Mode)
 # This file's job is *only* to forecast total demand.
 
+import numpy as np # <-- (NEW) For stochastic sampling
 from forecasting import (
     forecast_demand, 
     forecast_demand_by_price_point,
@@ -23,24 +24,31 @@ def _convert_cumulative_to_independent_demand(cumulative_demand: list) -> list:
     return independent_demand
 
 
-def get_quota_forecasts():
+def get_quota_forecasts(stochastic_mode: bool = False): # <-- (NEW)
     """
     (NEW) Runs "End-of-Horizon" forecasts for ALL quotas to get
     their total demand and expected revenue potential.
     
     This is the main "offline" process.
+    
+    (NEW) Args:
+        stochastic_mode: If True, samples demand from a normal distribution
+                         instead of using the fixed mean (mu).
     """
-    print("--- RUNNING 'END-OF-HORIZON' FORECASTING ENGINE ---")
+    if not stochastic_mode:
+        print("--- RUNNING 'END-OF-HORIZON' FORECASTING ENGINE (Deterministic Mode) ---")
     
     all_quota_forecasts = {}
     
     for tc in config.TRAVEL_CLASSES:
-        print(f"\n================ Processing Class: {tc} ================")
+        if not stochastic_mode:
+            print(f"\n================ Processing Class: {tc} ================")
         all_quota_forecasts[tc] = {}
         total_class_capacity = config.CAPACITY[tc]
 
         for q_code, q_config in config.QUOTA_CONFIG.items():
-            print(f"\n--- Forecasting TOTAL demand for Quota: {q_code} ---")
+            if not stochastic_mode:
+                print(f"\n--- Forecasting TOTAL demand for Quota: {q_code} ---")
 
             class_historical_data = [
                 r for r in config.DETAILED_HISTORICAL_DATA[tc] 
@@ -49,17 +57,28 @@ def get_quota_forecasts():
 
             forecast_total = {'mu': 0, 'sigma': 0}
             if class_historical_data:
-                factors = calculate_demand_factors(class_historical_data, total_class_capacity)
+                factors = calculate_demand_factors(class_historical_data, total_class_capacity, quiet=stochastic_mode)
                 unconstrained = [rec['true_demand'] for rec in class_historical_data]
                 forecast_total = forecast_demand(
-                    unconstrained, config.EXTERNAL_FACTORS, factors, q_code
+                    unconstrained, config.EXTERNAL_FACTORS, factors, q_code, quiet=stochastic_mode
                 )
             
             total_market_mu = forecast_total['mu']
+            total_market_sigma = forecast_total['sigma'] # Get sigma
             
             if total_market_mu == 0 and not class_historical_data:
-                 print("... No historical data, using fallback demand 10.")
+                 if not stochastic_mode:
+                    print("... No historical data, using fallback demand 10.")
                  total_market_mu = 10 
+                 total_market_sigma = total_market_mu * 0.15 # Assign a sigma
+
+            # --- (NEW) STOCHASTIC MODE LOGIC ---
+            if stochastic_mode:
+                # Sample the total market demand from its distribution
+                sampled_mu = np.random.normal(total_market_mu, total_market_sigma)
+                # Ensure demand is non-negative
+                total_market_mu = max(0, int(sampled_mu))
+            # --- (END OF NEW) ---
 
             cumulative_demand_total = []
             prices = []
@@ -67,12 +86,12 @@ def get_quota_forecasts():
             if q_config['type'] == 'FLEXI':
                 price_buckets = q_config['price_config'][tc]
                 (cumulative_demand_total, prices) = forecast_demand_by_price_point(
-                    total_market_mu, price_buckets
+                    total_market_mu, price_buckets, quiet=stochastic_mode
                 )
             elif q_config['type'] == 'FLAT':
                 price = q_config['price_config'][tc]
                 (cumulative_demand_total, prices) = get_flat_price_demand_forecast(
-                    total_market_mu, price
+                    total_market_mu, price, quiet=stochastic_mode
                 )
 
             independent_demand_total = _convert_cumulative_to_independent_demand(
@@ -86,8 +105,9 @@ def get_quota_forecasts():
             )
             avg_revenue = (max_revenue / total_demand) if total_demand > 0 else 0
             
-            print(f"TOTAL Independent demand for {q_code}: {independent_demand_total}")
-            print(f"Max Revenue: {max_revenue}, Total Demand: {total_demand}, Avg Revenue: {avg_revenue:.2f}")
+            if not stochastic_mode:
+                print(f"TOTAL Independent demand for {q_code}: {independent_demand_total}")
+                print(f"Max Revenue: {max_revenue}, Total Demand: {total_demand}, Avg Revenue: {avg_revenue:.2f}")
 
             # Store the data for the allocators
             all_quota_forecasts[tc][q_code] = {
@@ -96,6 +116,7 @@ def get_quota_forecasts():
                 'independent_bucket_demands': independent_demand_total,
                 'prices': prices
             }
-
-    print("\n--- FORECASTING ENGINE COMPLETE ---")
+    
+    if not stochastic_mode:
+        print("\n--- FORECASTING ENGINE COMPLETE ---")
     return all_quota_forecasts
