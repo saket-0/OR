@@ -1,211 +1,229 @@
-# FILE 4: main_engine.py (UPDATED for Dynamic Bid Price)
+# FILE 4: main_engine.py (UPDATED for Quota-Based Segmentation)
 
 import numpy as np
 from typing import Union 
 from unconstraining import unconstrain_demand
 from forecasting import forecast_demand
-from optimization import calculate_bid_price
+# Import the new optimization function
+from optimization import calculate_quota_allocation 
 from factor_calculator import calculate_demand_factors
 
 # --- 1. DEFINE SYSTEM PARAMETERS ---
-# (This section is unchanged)
 
 TRAVEL_CLASSES = ['1AC', '2AC', '3AC']
+BOOKING_WINDOW_DAYS = 120 # Use the realistic 120-day window
+
 CAPACITY = {'1AC': 30, '2AC': 60, '3AC': 110}
-FARE_BUCKETS = {
-    '1AC': [7000, 8500, 10000, 12000],
-    '2AC': [3000, 4000, 5000, 6000],
-    '3AC': [1800, 2500, 3500, 4500] 
-}
+
+# FARE_BUCKETS are no longer used in this model, as we have fixed quota prices
+# FARE_BUCKETS = { ... } 
+
+# Prices are now per-quota, not per-intent
 PRICES = {
-    '1AC': {'urgent': 10000, 'leisure': 7000},
-    '2AC': {'urgent': 6000,  'leisure': 3000},
-    '3AC': {'urgent': 3500,  'leisure': 1800}
+    '1AC': {'general': 7000, 'tatkal': 8500},
+    '2AC': {'general': 3000, 'tatkal': 4000},
+    '3AC': {'general': 1800, 'tatkal': 2500}
 }
 EXTERNAL_FACTORS = {'is_holiday': True, 'day_of_week': 'Fri'}
+
+# Historical data MUST now include the 'quota'
 DETAILED_HISTORICAL_DATA = {
     '1AC': [
-        {'train_id': 1, 'total_sold': 30, 'days_early': 5,  'is_holiday': True,  'day_of_week': 'Fri'},
-        {'train_id': 2, 'total_sold': 25, 'days_early': 0,  'is_holiday': False, 'day_of_week': 'Wed'},
-        {'train_id': 3, 'total_sold': 30, 'days_early': 1,  'is_holiday': False, 'day_of_week': 'Fri'},
+        {'train_id': 1, 'total_sold': 28, 'days_early': 5,  'is_holiday': True,  'day_of_week': 'Fri', 'quota': 'GN'},
+        {'train_id': 1, 'total_sold': 2,  'days_early': 1,  'is_holiday': True,  'day_of_week': 'Fri', 'quota': 'TQ'},
+        {'train_id': 2, 'total_sold': 25, 'days_early': 0,  'is_holiday': False, 'day_of_week': 'Wed', 'quota': 'GN'},
+        {'train_id': 3, 'total_sold': 30, 'days_early': 1,  'is_holiday': False, 'day_of_week': 'Fri', 'quota': 'GN'},
     ],
     '2AC': [
-        {'train_id': 1, 'total_sold': 60, 'days_early': 5,  'is_holiday': True,  'day_of_week': 'Fri'},
-        {'train_id': 2, 'total_sold': 60, 'days_early': 2,  'is_holiday': False, 'day_of_week': 'Wed'},
-        {'train_id': 3, 'total_sold': 55, 'days_early': 0,  'is_holiday': False, 'day_of_week': 'Mon'},
-        {'train_id': 4, 'total_sold': 60, 'days_early': 10, 'is_holiday': True,  'day_of_week': 'Sun'},
+        {'train_id': 1, 'total_sold': 55, 'days_early': 5,  'is_holiday': True,  'day_of_week': 'Fri', 'quota': 'GN'},
+        {'train_id': 1, 'total_sold': 5,  'days_early': 1,  'is_holiday': True,  'day_of_week': 'Fri', 'quota': 'TQ'},
+        {'train_id': 2, 'total_sold': 58, 'days_early': 2,  'is_holiday': False, 'day_of_week': 'Wed', 'quota': 'GN'},
+        {'train_id': 2, 'total_sold': 2,  'days_early': 1,  'is_holiday': False, 'day_of_week': 'Wed', 'quota': 'TQ'},
+        {'train_id': 3, 'total_sold': 55, 'days_early': 0,  'is_holiday': False, 'day_of_week': 'Mon', 'quota': 'GN'},
+        {'train_id': 4, 'total_sold': 50, 'days_early': 10, 'is_holiday': True,  'day_of_week': 'Sun', 'quota': 'GN'},
+        {'train_id': 4, 'total_sold': 10, 'days_early': 1,  'is_holiday': True,  'day_of_week': 'Sun', 'quota': 'TQ'},
     ],
     '3AC': [
-        {'train_id': 1, 'total_sold': 110, 'days_early': 5,  'is_holiday': True,  'day_of_week': 'Fri'},
-        {'train_id': 2, 'total_sold': 100, 'days_early': 0, 'is_holiday': False, 'day_of_week': 'Wed'},
-        {'train_id': 3, 'total_sold': 95,  'days_early': 0, 'is_holiday': False, 'day_of_week': 'Mon'},
-        {'train_id': 4, 'total_sold': 110, 'days_early': 10,'is_holiday': True,  'day_of_week': 'Sun'},
-        {'train_id': 5, 'total_sold': 105, 'days_early': 0, 'is_holiday': False, 'day_of_week': 'Tue'},
-        {'train_id': 6, 'total_sold': 110, 'days_early': 1, 'is_holiday': False, 'day_of_week': 'Fri'},
+        {'train_id': 1, 'total_sold': 100, 'days_early': 5, 'is_holiday': True,  'day_of_week': 'Fri', 'quota': 'GN'},
+        {'train_id': 1, 'total_sold': 10,  'days_early': 1, 'is_holiday': True,  'day_of_week': 'Fri', 'quota': 'TQ'},
+        {'train_id': 2, 'total_sold': 100, 'days_early': 0, 'is_holiday': False, 'day_of_week': 'Wed', 'quota': 'GN'},
+        {'train_id': 3, 'total_sold': 95,  'days_early': 0, 'is_holiday': False, 'day_of_week': 'Mon', 'quota': 'GN'},
+        {'train_id': 4, 'total_sold': 90,  'days_early': 10,'is_holiday': True,  'day_of_week': 'Sun', 'quota': 'GN'},
+        {'train_id': 4, 'total_sold': 20,  'days_early': 1, 'is_holiday': True,  'day_of_week': 'Sun', 'quota': 'TQ'},
+        {'train_id': 5, 'total_sold': 105, 'days_early': 0, 'is_holiday': False, 'day_of_week': 'Tue', 'quota': 'GN'},
+        {'train_id': 6, 'total_sold': 108, 'days_early': 1, 'is_holiday': False, 'day_of_week': 'Fri', 'quota': 'GN'},
+        {'train_id': 6, 'total_sold': 2,   'days_early': 1, 'is_holiday': False, 'day_of_week': 'Fri', 'quota': 'TQ'},
     ]
 }
 
 
 # --- 2. THE "GATEKEEPER" (PRICE QUOTER) ---
-# (This function is unchanged and correct)
-def get_offered_price(travel_class: str, bid_price: float, seats_available: int) -> Union[float, None]:
-    if seats_available <= 0:
-        return None
-    available_buckets = FARE_BUCKETS[travel_class]
-    for fare in available_buckets:
-        if fare >= bid_price:
-            return fare
-    return None
+# (This function is no longer needed, as we have fixed quota prices)
+# def get_offered_price(...)
 
 
 # --- 3. RUN THE OFFLINE ENGINE (UPDATED) ---
 def run_offline_engine(remaining_capacity_map: dict, days_remaining: int):
     """
     Runs the full RM process based on the *current* system state.
-    
-    Args:
-        remaining_capacity_map: A dict of *remaining* seats for each class.
-        days_remaining: How many days are left to sell.
+    Calculates the optimal *quota allocation* for the remaining days.
     """
     print("--- RUNNING DAILY OFFLINE ENGINE ---")
     
-    optimal_bid_prices = {}
+    optimal_allocations = {}
     
     for tc in TRAVEL_CLASSES:
         print(f"\n--- Processing Class: {tc} ---")
         
-        # --- KEY CHANGES HERE ---
-        # 1. Use *remaining* capacity for optimization
+        # 1. Get *remaining* capacity for optimization
         class_capacity_remaining = remaining_capacity_map[tc]
         
-        # 2. Use *full* historical data for learning
-        class_historical_data = DETAILED_HISTORICAL_DATA[tc]
-        class_prices = PRICES[tc] 
-        
-        # We must get the *total* capacity for this class to unconstrain properly
+        # 2. Get *total* capacity for unconstraining
         total_class_capacity = CAPACITY[tc]
+        class_prices = PRICES[tc] 
+        class_historical_data = DETAILED_HISTORICAL_DATA[tc]
 
-        # Calculate factors (learning from history)
-        demand_factors = calculate_demand_factors(class_historical_data, total_class_capacity)
-        
-        # Get unconstrained estimates (learning from history)
-        unconstrained_estimates = [rec['true_demand'] for rec in class_historical_data]
+        # --- 3. Run for GENERAL Quota ---
+        hist_data_gn = [r for r in class_historical_data if r['quota'] == 'GN']
+        # Only run if we have data
+        if hist_data_gn:
+            factors_gn = calculate_demand_factors(hist_data_gn, total_class_capacity)
+            unconstrained_gn = [rec['true_demand'] for rec in hist_data_gn]
+            forecast_gn = forecast_demand(
+                unconstrained_gn, EXTERNAL_FACTORS, factors_gn, days_remaining, 'GN'
+            )
+        else:
+            forecast_gn = {'mu': 0, 'sigma': 0} # No forecast if no data
 
-        # Forecast *remaining* demand (using days_remaining)
-        forecast = forecast_demand(
-            unconstrained_estimates, 
-            EXTERNAL_FACTORS, 
-            demand_factors,
-            days_remaining  # <-- Pass in remaining days
-        ) 
+        # --- 4. Run for TATKAL Quota ---
+        hist_data_tq = [r for r in class_historical_data if r['quota'] == 'TQ']
+        if hist_data_tq:
+            factors_tq = calculate_demand_factors(hist_data_tq, total_class_capacity)
+            unconstrained_tq = [rec['true_demand'] for rec in hist_data_tq]
+            forecast_tq = forecast_demand(
+                unconstrained_tq, EXTERNAL_FACTORS, factors_tq, days_remaining, 'TQ'
+            )
+        else:
+            forecast_tq = {'mu': 0, 'sigma': 0} # No forecast if no data
+
+        # --- 5. Optimize ---
+        # Get the optimal quota allocation based on *remaining* capacity
+        if class_capacity_remaining > 0:
+            allocation = calculate_quota_allocation(
+                forecast_gn, 
+                forecast_tq, 
+                class_prices, 
+                class_capacity_remaining 
+            )
+        else:
+            # If no seats are left, no allocation needed
+            allocation = {'general_booking_limit': 0, 'tatkal_protection_level': 0}
         
-        # Optimize based on *remaining* capacity
-        bid_price = calculate_bid_price(
-            forecast, 
-            class_prices, 
-            class_capacity_remaining # <-- Pass in remaining seats
-        )
-        
-        optimal_bid_prices[tc] = bid_price
+        optimal_allocations[tc] = allocation
 
     print("--- DAILY OFFLINE RUN COMPLETE ---")
-    return optimal_bid_prices
+    return optimal_allocations
 
 
 # --- 4. RUN THE DYNAMIC SIMULATION ---
 def run_dynamic_simulation():
     """
-    Simulates the 30-day booking window, re-calculating the
-    bid price every single day.
+    Simulates the 120-day booking window, re-calculating the
+    quota allocations every single day.
     """
-    print("\n--- RUNNING *DYNAMIC* ONLINE SIMULATION (30 Days) ---")
+    print(f"\n--- RUNNING *DYNAMIC* ONLINE SIMULATION ({BOOKING_WINDOW_DAYS} Days) ---")
     
     # --- Initialize Simulation State ---
     total_revenue = 0
-    seats_sold = {tc: 0 for tc in TRAVEL_CLASSES}
-    bookings_accepted = {tc: {'leisure': 0, 'urgent': 0} for tc in TRAVEL_CLASSES}
-    bookings_rejected = {tc: {'leisure': 0, 'urgent': 0} for tc in TRAVEL_CLASSES}
+    # Track seats sold by quota
+    seats_sold = {tc: {'GN': 0, 'TQ': 0} for tc in TRAVEL_CLASSES}
+    bookings_accepted = {tc: {'GN': 0, 'TQ': 0} for tc in TRAVEL_CLASSES}
+    bookings_rejected = {tc: {'GN': 0, 'TQ': 0} for tc in TRAVEL_CLASSES}
     
-    # This will be updated every day
-    current_bid_prices = {}
+    current_allocations = {}
 
-    # --- Main Simulation Loop (Day 30 down to Day 1) ---
-    for day in range(30, 0, -1):
+    # --- Main Simulation Loop (Day 120 down to Day 1) ---
+    for day in range(BOOKING_WINDOW_DAYS, 0, -1):
         print(f"\n================ DAY {day} (Booking Window Open) ================")
         
-        # 1. Get current remaining capacity
-        remaining_capacity = {tc: CAPACITY[tc] - seats_sold[tc] for tc in TRAVEL_CLASSES}
+        # 1. Get current total remaining capacity
+        remaining_capacity = {}
+        for tc in TRAVEL_CLASSES:
+            total_sold_for_class = seats_sold[tc]['GN'] + seats_sold[tc]['TQ']
+            remaining_capacity[tc] = CAPACITY[tc] - total_sold_for_class
         
-        # 2. Re-run the offline engine to get new bid prices for *today*
-        current_bid_prices = run_offline_engine(remaining_capacity, day)
-        print(f"Updated Bid Prices for Day {day}: {current_bid_prices}")
+        # 2. Re-run the offline engine to get new allocations for *today*
+        current_allocations = run_offline_engine(remaining_capacity, day)
+        print(f"Updated Allocations for Day {day}: {current_allocations}")
 
         # 3. Simulate customer arrivals for *this day*
-        for tc in TRAVEL_CLASSES:
-            
-            class_bid_price = current_bid_prices[tc]
-            class_capacity_total = CAPACITY[tc] # Total capacity
-            
-            # --- Customer Arrival Logic (unchanged) ---
-            if tc == '3AC':
-                leisure_lambda = 10 if day > 3 else 2
-                urgent_lambda = 2 if day > 3 else 10
-            elif tc == '2AC':
-                leisure_lambda = 6 if day > 3 else 2
-                urgent_lambda = 2 if day > 3 else 15
-            else: # 1AC
-                leisure_lambda = 2 if day > 3 else 1
-                urgent_lambda = 1 if day > 3 else 5
-            
-            leisure_arrivals = np.random.poisson(leisure_lambda)
-            urgent_arrivals = np.random.poisson(urgent_lambda)
+        
+        # --- GENERAL QUOTA WINDOW (Day 120 down to 2) ---
+        if day > 1:
+            for tc in TRAVEL_CLASSES:
+                # Get the booking limit calculated by the optimizer
+                gn_booking_limit = current_allocations[tc]['general_booking_limit']
+                
+                # Simulate arrivals for General quota
+                # (Simple simulation: 5 arrivals per day)
+                general_arrivals = np.random.poisson(5) 
+                price_gn = PRICES[tc]['general']
 
-            # --- Process Leisure Customers (with bug fix) ---
-            leisure_wtp = PRICES[tc]['leisure']
-            for _ in range(leisure_arrivals):
-                seats_available = class_capacity_total - seats_sold[tc]
-                offered_price = get_offered_price(tc, class_bid_price, seats_available)
-
-                if offered_price is not None and leisure_wtp >= offered_price:
-                    seats_sold[tc] += 1
-                    total_revenue += offered_price 
-                    bookings_accepted[tc]['leisure'] += 1
-                else:
-                    bookings_rejected[tc]['leisure'] += 1
+                for _ in range(general_arrivals):
+                    # --- NEW GATEKEEPER LOGIC ---
+                    # We check two things:
+                    # 1. Have we sold more than our 'GN' limit?
+                    # 2. Is the class *actually* full?
+                    total_sold_for_class = seats_sold[tc]['GN'] + seats_sold[tc]['TQ']
                     
-            # --- Process Urgent Customers (with bug fix) ---
-            urgent_wtp = PRICES[tc]['urgent']
-            for _ in range(urgent_arrivals):
-                seats_available = class_capacity_total - seats_sold[tc]
-                offered_price = get_offered_price(tc, class_bid_price, seats_available)
+                    if seats_sold[tc]['GN'] < gn_booking_limit and \
+                       total_sold_for_class < CAPACITY[tc]:
+                        
+                        seats_sold[tc]['GN'] += 1
+                        total_revenue += price_gn
+                        bookings_accepted[tc]['GN'] += 1
+                    else:
+                        # Reject booking to *protect* seats for Tatkal or because full
+                        bookings_rejected[tc]['GN'] += 1
 
-                if offered_price is not None and urgent_wtp >= offered_price:
-                    seats_sold[tc] += 1
-                    total_revenue += offered_price
-                    bookings_accepted[tc]['urgent'] += 1
-                else:
-                    bookings_rejected[tc]['urgent'] += 1
+        # --- TATKAL QUOTA WINDOW (Day 1) ---
+        if day == 1:
+            print("\n!!! TATKAL WINDOW OPEN !!!")
+            for tc in TRAVEL_CLASSES:
+                # Simulate a spike in Tatkal arrivals
+                tatkal_arrivals = np.random.poisson(15) # High demand spike
+                price_tq = PRICES[tc]['tatkal']
+
+                for _ in range(tatkal_arrivals):
+                    # --- NEW GATEKEEPER LOGIC ---
+                    # Simple check: is there *any* seat left?
+                    total_sold_for_class = seats_sold[tc]['GN'] + seats_sold[tc]['TQ']
+                    
+                    if total_sold_for_class < CAPACITY[tc]:
+                        seats_sold[tc]['TQ'] += 1
+                        total_revenue += price_tq
+                        bookings_accepted[tc]['TQ'] += 1
+                    else:
+                        bookings_rejected[tc]['TQ'] += 1 # Sold out
 
     print("\n================ SIMULATION COMPLETE ================")
     print(f"\nTotal Revenue (All Classes): ₹{total_revenue:,}")
     
     print("\n--- FINAL CLASS BREAKDOWN ---")
     for tc in TRAVEL_CLASSES:
-        # Get the very last bid price from Day 1
-        final_bid_price = current_bid_prices.get(tc, 0)
-        final_offered_price = get_offered_price(tc, final_bid_price, 1) 
+        total_sold = seats_sold[tc]['GN'] + seats_sold[tc]['TQ']
         
         print(f"\nClass: {tc}")
-        print(f"  Seats Sold: {seats_sold[tc]} / {CAPACITY[tc]}")
-        print(f"  Final Bid Price (Day 1): ₹{final_bid_price:.0f}")
-        print(f"  Final Offered Price:   ₹{final_offered_price if final_offered_price else 'SOLD OUT'}")
-        
+        print(f"  Seats Sold: {total_sold} / {CAPACITY[tc]}")
+        print(f"  General Sold: {seats_sold[tc]['GN']}")
+        print(f"  Tatkal Sold:  {seats_sold[tc]['TQ']}")
+
         print("\n  Customer Segment Analysis:")
-        leisure_fare = PRICES[tc]['leisure']
-        urgent_fare = PRICES[tc]['urgent']
-        print(f"  Leisure (WTP: ₹{leisure_fare}): {bookings_accepted[tc]['leisure']} accepted, {bookings_rejected[tc]['leisure']} rejected")
-        print(f"  Urgent  (WTP: ₹{urgent_fare}):  {bookings_accepted[tc]['urgent']} accepted, {bookings_rejected[tc]['urgent']} rejected")
+        gn_fare = PRICES[tc]['general']
+        tq_fare = PRICES[tc]['tatkal']
+        print(f"  General (Fare: ₹{gn_fare}): {bookings_accepted[tc]['GN']} accepted, {bookings_rejected[tc]['GN']} rejected")
+        print(f"  Tatkal  (Fare: ₹{tq_fare}):  {bookings_accepted[tc]['TQ']} accepted, {bookings_rejected[tc]['TQ']} rejected")
 
 # --- RUN THE MODEL ---
 if __name__ == "__main__":
-    run_dynamic_simulation() # <-- This is the new main call
+    run_dynamic_simulation()
