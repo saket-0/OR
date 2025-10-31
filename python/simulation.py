@@ -1,97 +1,162 @@
-# FILE 7: simulation.py (FIXED for Flexi-Fare)
-# This file contains the "online" simulation logic.
+# FILE 7: simulation.py (UPDATED for 2-Step Allocation & Booking Curve)
 
 import numpy as np
 import config
-from engine import run_offline_engine
+from engine import get_quota_forecasts 
+from allocation_engine import partition_capacity_by_quota, partition_quota_into_buckets
+from booking_curve_model import PICKUP_CURVE # <-- NOW WE USE THIS
+
+def _get_or_initialize_key(data_dict, key, default_val=0):
+    """Helper to safely initialize nested dict keys."""
+    if key not in data_dict:
+        data_dict[key] = default_val
+    return data_dict[key]
 
 
 def run_dynamic_simulation():
     """
-    Simulates the 120-day booking window, re-calculating the
-    Flexi-Fare bucket allocations every single day.
+    (UPDATED) Simulates the 120-day booking window using
+    a 2-step static allocation and a realistic booking curve.
     """
+    
+    # --- 1. OFFLINE PHASE: Run Forecasts ---
+    all_quota_forecasts = get_quota_forecasts()
+    
+    # --- 2. OFFLINE PHASE: Run Master Allocation (Quota vs Quota) ---
+    master_allocations = {}
+    print("\n--- RUNNING MASTER ALLOCATION ENGINE (Quota vs. Quota) ---")
+    for tc in config.TRAVEL_CLASSES:
+        master_allocations[tc] = partition_capacity_by_quota(
+            all_quota_forecasts[tc],
+            config.CAPACITY[tc]
+        )
+    print(f"\n--- MASTER ALLOCATIONS COMPLETE: {master_allocations} ---")
+    
+    # --- 3. (NEW) OFFLINE PHASE: Run Inner Allocation (Bucket vs Bucket) ---
+    final_bucket_allocations = {}
+    print("\n--- RUNNING INNER ALLOCATION ENGINE (Bucket vs. Bucket) ---")
+    for tc in config.TRAVEL_CLASSES:
+        final_bucket_allocations[tc] = {}
+        for q_code, q_config in config.QUOTA_CONFIG.items():
+            
+            quota_total_allocation = master_allocations[tc].get(f"{q_code}_Allocation", 0)
+            if quota_total_allocation == 0:
+                continue # No seats allocated to this quota
+
+            forecast_data = all_quota_forecasts[tc][q_code]
+            
+            if q_config['type'] == 'FLEXI':
+                # Run the Inner LP to split this quota's seats
+                inner_alloc = partition_quota_into_buckets(
+                    forecast_data['independent_bucket_demands'],
+                    forecast_data['prices'],
+                    quota_total_allocation,
+                    q_code
+                )
+                final_bucket_allocations[tc].update(inner_alloc)
+            
+            elif q_config['type'] == 'FLAT':
+                # Flat quotas just get one bucket
+                final_bucket_allocations[tc][f"{q_code}_Bucket_0_Allocation"] = quota_total_allocation
+    
+    print(f"\n--- FINAL BUCKET ALLOCATIONS COMPLETE: {final_bucket_allocations} ---")
+
+    
+    # --- 4. ONLINE PHASE: Initialize Simulation ---
     print(f"\n--- RUNNING *DYNAMIC* ONLINE SIMULATION ({config.BOOKING_WINDOW_DAYS} Days) ---")
     
-    # --- Initialize Simulation State ---
     total_revenue = 0
-    
-    # Track seats sold *per bucket* (Total)
     seats_sold = {}
     bookings_accepted = {}
     bookings_rejected = {}
-    for tc in config.TRAVEL_CLASSES:
-        num_buckets = len(config.FLEXI_FARE_STRUCTURE[tc])
-        seats_sold[tc] = {f'Bucket_{i}': 0 for i in range(num_buckets)}
-        bookings_accepted[tc] = {f'Bucket_{i}': 0 for i in range(num_buckets)}
-        bookings_rejected[tc] = {'total': 0} 
     
-    current_allocations = {}
-
-    # --- Main Simulation Loop (Day 120 down to Day 1) ---
+    for tc in config.TRAVEL_CLASSES:
+        bookings_rejected[tc] = {}
+        seats_sold[tc] = {} 
+        bookings_accepted[tc] = {} 
+        
+    # --- 5. Main Simulation Loop (Day 120 down to Day 1) ---
     for day in range(config.BOOKING_WINDOW_DAYS, 0, -1):
         print(f"\n================ DAY {day} (Booking Window Open) ================")
         
-        # 1. Get current total remaining capacity
-        remaining_capacity = {}
         for tc in config.TRAVEL_CLASSES:
-            total_sold_for_class = sum(seats_sold[tc].values())
-            remaining_capacity[tc] = config.CAPACITY[tc] - total_sold_for_class
-        
-        # 2. Re-run the offline engine to get new *bucket allocations*
-        #    This allocation is the optimal number of *additional* seats
-        #    to sell from *this day forward*.
-        current_allocations = run_offline_engine(remaining_capacity, day)
-        print(f"Updated Allocations for Day {day}: {current_allocations}")
-
-        # (NEW) We must track sales *for this day* against the new limit
-        seats_sold_today = {}
-        for tc in config.TRAVEL_CLASSES:
-            num_buckets = len(config.FLEXI_FARE_STRUCTURE[tc])
-            seats_sold_today[tc] = {f'Bucket_{i}': 0 for i in range(num_buckets)}
-
-        # 3. Simulate customer arrivals for *this day*
-        for tc in config.TRAVEL_CLASSES:
-            class_buckets = config.FLEXI_FARE_STRUCTURE[tc]
+            class_bucket_allocs = final_bucket_allocations[tc]
             
-            daily_arrivals = np.random.poisson(7) 
-
-            for _ in range(daily_arrivals):
-                total_sold_for_class = sum(seats_sold[tc].values())
+            for q_code, q_config in config.QUOTA_CONFIG.items():
                 
-                # Check overall capacity
-                if total_sold_for_class >= config.CAPACITY[tc]:
-                    bookings_rejected[tc]['total'] += 1
-                    continue # Train is full
+                # Check if this quota is open for booking today
+                if day > q_config['booking_window_open']:
+                    continue 
 
-                # --- Flexi-Fare "Bid Price" Logic ---
-                sold_ticket = False
-                for i, bucket in enumerate(class_buckets):
-                    bucket_alloc_key = f'Bucket_{i}_Allocation'
-                    bucket_sold_key = f'Bucket_{i}'
-                    
-                    # Get the *new* limit for *additional* sales
-                    bucket_limit_for_today = current_allocations[tc].get(bucket_alloc_key, 0)
-                    # Get the number of sales *today*
-                    num_sold_in_bucket_today = seats_sold_today[tc].get(bucket_sold_key, 0)
-                    
-                    # Check if we are still under *today's* limit
-                    if num_sold_in_bucket_today < bucket_limit_for_today:
-                        # Found an open bucket! Sell the ticket.
-                        
-                        # Increment *today's* sales tracker
-                        seats_sold_today[tc][bucket_sold_key] += 1
-                        # Increment *total* sales tracker
-                        seats_sold[tc][bucket_sold_key] += 1
-                        
-                        total_revenue += bucket['price']
-                        bookings_accepted[tc][bucket_sold_key] += 1
-                        sold_ticket = True
-                        break # Move to next customer
+                # --- (NEW) REALISTIC ARRIVALS USING BOOKING CURVE ---
+                daily_arrivals = 0
+                total_demand = all_quota_forecasts[tc][q_code]['total_demand']
                 
-                if not sold_ticket:
-                    # All buckets optimized for today are full
-                    bookings_rejected[tc]['total'] += 1
+                if q_code == 'GN' or q_code == 'LD':
+                    # Use the main booking curve
+                    percent_sold_today = PICKUP_CURVE.get(day, 1.0)
+                    percent_sold_tmrw = PICKUP_CURVE.get(day - 1, 1.0)
+                    percent_to_book_this_day = percent_sold_tmrw - percent_sold_today
+                    
+                    # Use total demand as the base for arrivals
+                    avg_arrivals = total_demand * percent_to_book_this_day
+                    daily_arrivals = np.random.poisson(avg_arrivals)
+                
+                elif q_code == 'TK':
+                    # Tatkal demand arrives all at once
+                    if day == q_config['booking_window_open']:
+                        avg_arrivals = total_demand
+                        daily_arrivals = np.random.poisson(avg_arrivals)
+                
+                if daily_arrivals == 0: continue
+                
+                print(f"  Simulating {daily_arrivals} arrivals for Class {tc}, Quota {q_code}...")
+                _get_or_initialize_key(bookings_rejected[tc], q_code, 0)
+                
+                price_config = q_config['price_config'][tc]
+                
+                # --- Handle arrivals for this specific quota ---
+                for _ in range(daily_arrivals):
+                    sold_ticket = False
+                    
+                    if q_config['type'] == 'FLEXI':
+                        # --- (NEW) TRUE FLEXI-FARE SIMULATION LOGIC ---
+                        for i, bucket_info in enumerate(price_config):
+                            alloc_key = f"{q_code}_Bucket_{i}_Allocation"
+                            bucket_limit = class_bucket_allocs.get(alloc_key, 0)
+                            
+                            sold_key = f"{q_code}_Bucket_{i}"
+                            total_bucket_seats_sold = _get_or_initialize_key(seats_sold[tc], sold_key, 0)
+
+                            # Check if this *specific bucket* has capacity left
+                            if total_bucket_seats_sold < bucket_limit:
+                                # Sell the ticket!
+                                seats_sold[tc][sold_key] += 1
+                                total_revenue += bucket_info['price']
+                                _get_or_initialize_key(bookings_accepted[tc], sold_key, 0)
+                                bookings_accepted[tc][sold_key] += 1
+                                
+                                sold_ticket = True
+                                break # Move to next customer
+                    
+                    elif q_config['type'] == 'FLAT':
+                        # --- Flat-Fare Logic (e.g., TK, LD) ---
+                        alloc_key = f"{q_code}_Bucket_0_Allocation"
+                        bucket_limit = class_bucket_allocs.get(alloc_key, 0)
+                        
+                        sold_key = f"{q_code}_Bucket_0"
+                        total_bucket_seats_sold = _get_or_initialize_key(seats_sold[tc], sold_key, 0)
+
+                        if total_bucket_seats_sold < bucket_limit:
+                            seats_sold[tc][sold_key] += 1
+                            total_revenue += price_config # price_config is just the flat price
+                            _get_or_initialize_key(bookings_accepted[tc], sold_key, 0)
+                            bookings_accepted[tc][sold_key] += 1
+                            sold_ticket = True
+                    
+                    if not sold_ticket:
+                        # All available buckets for this customer were full
+                        bookings_rejected[tc][q_code] += 1
 
     print("\n================ SIMULATION COMPLETE ================")
     print(f"\nTotal Revenue (All Classes): ₹{total_revenue:,}")
@@ -101,12 +166,14 @@ def run_dynamic_simulation():
         total_sold = sum(seats_sold[tc].values())
         print(f"\nClass: {tc}")
         print(f"  Seats Sold: {total_sold} / {config.CAPACITY[tc]}")
+        print(f"  Master Allocation was: {master_allocations[tc]}")
 
-        print("\n  Customer Segment Analysis:")
-        for i, bucket in enumerate(config.FLEXI_FARE_STRUCTURE[tc]):
-            bucket_sold_key = f'Bucket_{i}'
-            num_accepted = bookings_accepted[tc][bucket_sold_key]
-            price = bucket['price']
-            print(f"  {bucket['name']} (Fare: ₹{price:,}): {num_accepted} accepted")
+        print("\n  Customer Segment Analysis (by Quota-Bucket):")
+        for sold_key, num_accepted in sorted(bookings_accepted[tc].items()):
+            if num_accepted > 0:
+                print(f"  {sold_key}: {num_accepted} accepted")
         
-        print(f"  Total Rejected: {bookings_rejected[tc]['total']}")
+        print("\n  Total Rejected (by Quota):")
+        for q_code, num_rejected in sorted(bookings_rejected[tc].items()):
+            if num_rejected > 0:
+                print(f"  {q_code}: {num_rejected} rejected")
