@@ -1,13 +1,19 @@
-# FILE 1: unconstraining.py
+# FILE 1: unconstraining.py (REFINED HEURISTIC)
 
 import pandas as pd
+
+# --- REFINED MODEL PARAMETER ---
+# This is our configurable assumption for the "daily spill factor".
+# 8% is a more aggressive (and likely realistic) assumption
+# for compounded unconstrained demand.
+DAILY_SPILL_FACTOR = 0.08 
 
 def unconstrain_demand(historical_sales: list, capacity: int) -> list:
     """
     Estimates true (unconstrained) demand from historical sales data.
 
-    This basic heuristic assumes that if a train sold out early,
-    the true demand was higher.
+    This *refined* heuristic uses an exponential compounding factor,
+    assuming that demand "spills" and compounds each day.
 
     Args:
         historical_sales: A list of dicts, e.g., 
@@ -18,7 +24,7 @@ def unconstrain_demand(historical_sales: list, capacity: int) -> list:
     Returns:
         A list of unconstrained demand estimates.
     """
-    print("Step 1: Unconstraining historical data...")
+    print("Step 1: Unconstraining historical data (Refined)...")
     unconstrained_estimates = []
     
     for record in historical_sales:
@@ -29,12 +35,14 @@ def unconstrain_demand(historical_sales: list, capacity: int) -> list:
             # Train did not sell out. Sales = True Demand.
             unconstrained_estimates.append(sold)
         else:
-            # Train sold out. Apply heuristic.
-            # Heuristic: 10% more demand for each day it sold out early.
-            # (A real EM algorithm would be much more complex)
-            early_booking_factor = 1.0 + (days_early * 0.10)
+            # --- REFINED HEURISTIC ---
+            # Train sold out. Apply an exponential heuristic.
+            # Old linear: (1.0 + (days_early * 0.10))
+            # New exponential: (1.0 + DAILY_SPILL_FACTOR) ** days_early
+            early_booking_factor = (1.0 + DAILY_SPILL_FACTOR) ** days_early
             estimated_demand = int(sold * early_booking_factor)
             unconstrained_estimates.append(estimated_demand)
+            # -------------------------
             
     print(f"Unconstrained estimates: {unconstrained_estimates}")
     return unconstrained_estimates
