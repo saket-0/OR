@@ -1,40 +1,28 @@
-# FILE 4: main_engine.py (UPDATED for Multi-Class)
+# FILE 4: main_engine.py (UPDATED for Dynamic Bid Price)
 
 import numpy as np
+from typing import Union 
 from unconstraining import unconstrain_demand
 from forecasting import forecast_demand
 from optimization import calculate_bid_price
 from factor_calculator import calculate_demand_factors
 
-# --- 1. DEFINE SYSTEM PARAMETERS (Now by Class) ---
+# --- 1. DEFINE SYSTEM PARAMETERS ---
+# (This section is unchanged)
 
-# Define the classes we are managing
 TRAVEL_CLASSES = ['1AC', '2AC', '3AC']
-
-# Inventory for each class
-CAPACITY = {
-    '1AC': 30,
-    '2AC': 60,
-    '3AC': 110
-    # Total = 200
+CAPACITY = {'1AC': 30, '2AC': 60, '3AC': 110}
+FARE_BUCKETS = {
+    '1AC': [7000, 8500, 10000, 12000],
+    '2AC': [3000, 4000, 5000, 6000],
+    '3AC': [1800, 2500, 3500, 4500] 
 }
-
-# Fare classes (leisure/urgent) *within* each travel class
 PRICES = {
     '1AC': {'urgent': 10000, 'leisure': 7000},
     '2AC': {'urgent': 6000,  'leisure': 3000},
     '3AC': {'urgent': 3500,  'leisure': 1800}
 }
-
-# Causal factors for the *new* train we are pricing
-# (These are train-level, so they apply to all classes)
-EXTERNAL_FACTORS = {
-    'is_holiday': True,
-    'day_of_week': 'Fri'
-}
-
-# --- Detailed Historical Data (Now broken down by class) ---
-# In a real system, this would come from a database query
+EXTERNAL_FACTORS = {'is_holiday': True, 'day_of_week': 'Fri'}
 DETAILED_HISTORICAL_DATA = {
     '1AC': [
         {'train_id': 1, 'total_sold': 30, 'days_early': 5,  'is_holiday': True,  'day_of_week': 'Fri'},
@@ -58,103 +46,107 @@ DETAILED_HISTORICAL_DATA = {
 }
 
 
-# --- 2. THE "GATEKEEPER" (Inventory Control Logic) ---
-# (This function is unchanged, it is generic)
-def should_accept_booking(fare: float, bid_price: float, seats_available: int) -> bool:
-    """
-    The real-time Bid-Price Control logic.
-    Accepts a booking if the fare is >= the opportunity cost (bid price)
-    and a seat is available.
-    """
+# --- 2. THE "GATEKEEPER" (PRICE QUOTER) ---
+# (This function is unchanged and correct)
+def get_offered_price(travel_class: str, bid_price: float, seats_available: int) -> Union[float, None]:
     if seats_available <= 0:
-        return False
+        return None
+    available_buckets = FARE_BUCKETS[travel_class]
+    for fare in available_buckets:
+        if fare >= bid_price:
+            return fare
+    return None
+
+
+# --- 3. RUN THE OFFLINE ENGINE (UPDATED) ---
+def run_offline_engine(remaining_capacity_map: dict, days_remaining: int):
+    """
+    Runs the full RM process based on the *current* system state.
     
-    # This is the core rule!
-    return fare >= bid_price
-
-
-# --- 3. RUN THE OFFLINE ENGINE (Once per day) ---
-def run_offline_engine():
+    Args:
+        remaining_capacity_map: A dict of *remaining* seats for each class.
+        days_remaining: How many days are left to sell.
     """
-    Runs the full RM process *for each travel class* to generate
-    a dictionary of optimal bid prices.
-    """
-    print("--- RUNNING OFFLINE ENGINE FOR ALL CLASSES ---")
+    print("--- RUNNING DAILY OFFLINE ENGINE ---")
     
     optimal_bid_prices = {}
     
     for tc in TRAVEL_CLASSES:
         print(f"\n--- Processing Class: {tc} ---")
         
-        # 1. Get data for *this class only*
-        class_capacity = CAPACITY[tc]
-        class_historical_data = DETAILED_HISTORICAL_DATA[tc]
-        class_prices = PRICES[tc]
-
-        # 2. Calculate factors from this class's data
-        #
-        demand_factors = calculate_demand_factors(class_historical_data, class_capacity)
+        # --- KEY CHANGES HERE ---
+        # 1. Use *remaining* capacity for optimization
+        class_capacity_remaining = remaining_capacity_map[tc]
         
-        # 3. Get unconstrained estimates for this class
-        #
+        # 2. Use *full* historical data for learning
+        class_historical_data = DETAILED_HISTORICAL_DATA[tc]
+        class_prices = PRICES[tc] 
+        
+        # We must get the *total* capacity for this class to unconstrain properly
+        total_class_capacity = CAPACITY[tc]
+
+        # Calculate factors (learning from history)
+        demand_factors = calculate_demand_factors(class_historical_data, total_class_capacity)
+        
+        # Get unconstrained estimates (learning from history)
         unconstrained_estimates = [rec['true_demand'] for rec in class_historical_data]
 
-        # 4. Forecast demand for this class
-        #
+        # Forecast *remaining* demand (using days_remaining)
         forecast = forecast_demand(
             unconstrained_estimates, 
             EXTERNAL_FACTORS, 
-            demand_factors
+            demand_factors,
+            days_remaining  # <-- Pass in remaining days
         ) 
         
-        # 5. Optimize to find the bid price for this class
-        #
-        bid_price = calculate_bid_price(forecast, class_prices, class_capacity)
+        # Optimize based on *remaining* capacity
+        bid_price = calculate_bid_price(
+            forecast, 
+            class_prices, 
+            class_capacity_remaining # <-- Pass in remaining seats
+        )
         
-        # 6. Store the result
         optimal_bid_prices[tc] = bid_price
 
-    print("\n--- OFFLINE ENGINE RUN COMPLETE ---")
-    print(f"Final Bid Prices: {optimal_bid_prices}")
+    print("--- DAILY OFFLINE RUN COMPLETE ---")
     return optimal_bid_prices
 
 
-# --- 4. RUN THE ONLINE SIMULATION (Simulates the booking window) ---
-def run_online_simulation(bid_prices: dict):
+# --- 4. RUN THE DYNAMIC SIMULATION ---
+def run_dynamic_simulation():
     """
-    Simulates the 30-day booking window using the Bid-Price Gatekeeper
-    for each separate travel class.
-    
-    Args:
-        bid_prices: A dict of bid prices, e.g.,
-                    {'1AC': 7500.0, '2AC': 3100.0, '3AC': 1900.0}
+    Simulates the 30-day booking window, re-calculating the
+    bid price every single day.
     """
-    print("\n--- RUNNING ONLINE SIMULATION (ALL CLASSES) ---")
+    print("\n--- RUNNING *DYNAMIC* ONLINE SIMULATION (30 Days) ---")
     
-    # --- Simulation State (Track everything by class) ---
+    # --- Initialize Simulation State ---
     total_revenue = 0
     seats_sold = {tc: 0 for tc in TRAVEL_CLASSES}
+    bookings_accepted = {tc: {'leisure': 0, 'urgent': 0} for tc in TRAVEL_CLASSES}
+    bookings_rejected = {tc: {'leisure': 0, 'urgent': 0} for tc in TRAVEL_CLASSES}
     
-    bookings_accepted = {
-        tc: {'leisure': 0, 'urgent': 0} for tc in TRAVEL_CLASSES
-    }
-    bookings_rejected = {
-        tc: {'leisure': 0, 'urgent': 0} for tc in TRAVEL_CLASSES
-    }
-    # ----------------------------------------------------
+    # This will be updated every day
+    current_bid_prices = {}
 
-    for day in range(30, 0, -1): # Loop from Day 30 down to Day 1
+    # --- Main Simulation Loop (Day 30 down to Day 1) ---
+    for day in range(30, 0, -1):
+        print(f"\n================ DAY {day} (Booking Window Open) ================")
         
-        # --- Simulate Customer Arrivals for *EACH CLASS* ---
+        # 1. Get current remaining capacity
+        remaining_capacity = {tc: CAPACITY[tc] - seats_sold[tc] for tc in TRAVEL_CLASSES}
+        
+        # 2. Re-run the offline engine to get new bid prices for *today*
+        current_bid_prices = run_offline_engine(remaining_capacity, day)
+        print(f"Updated Bid Prices for Day {day}: {current_bid_prices}")
+
+        # 3. Simulate customer arrivals for *this day*
         for tc in TRAVEL_CLASSES:
             
-            # Get class-specific info
-            class_bid_price = bid_prices[tc]
-            class_prices = PRICES[tc]
-            class_capacity = CAPACITY[tc]
+            class_bid_price = current_bid_prices[tc]
+            class_capacity_total = CAPACITY[tc] # Total capacity
             
-            # Simulate different arrival patterns for each class
-            # (e.g., 3AC books earlier, 1AC books later)
+            # --- Customer Arrival Logic (unchanged) ---
             if tc == '3AC':
                 leisure_lambda = 10 if day > 3 else 2
                 urgent_lambda = 2 if day > 3 else 10
@@ -168,47 +160,52 @@ def run_online_simulation(bid_prices: dict):
             leisure_arrivals = np.random.poisson(leisure_lambda)
             urgent_arrivals = np.random.poisson(urgent_lambda)
 
-            # --- Process Leisure Customers for this class ---
+            # --- Process Leisure Customers (with bug fix) ---
+            leisure_wtp = PRICES[tc]['leisure']
             for _ in range(leisure_arrivals):
-                fare = class_prices['leisure']
-                seats_available = class_capacity - seats_sold[tc]
-                
-                if should_accept_booking(fare, class_bid_price, seats_available):
+                seats_available = class_capacity_total - seats_sold[tc]
+                offered_price = get_offered_price(tc, class_bid_price, seats_available)
+
+                if offered_price is not None and leisure_wtp >= offered_price:
                     seats_sold[tc] += 1
-                    total_revenue += fare
+                    total_revenue += offered_price 
                     bookings_accepted[tc]['leisure'] += 1
                 else:
                     bookings_rejected[tc]['leisure'] += 1
                     
-            # --- Process Urgent Customers for this class ---
+            # --- Process Urgent Customers (with bug fix) ---
+            urgent_wtp = PRICES[tc]['urgent']
             for _ in range(urgent_arrivals):
-                fare = class_prices['urgent']
-                seats_available = class_capacity - seats_sold[tc]
-                
-                if should_accept_booking(fare, class_bid_price, seats_available):
+                seats_available = class_capacity_total - seats_sold[tc]
+                offered_price = get_offered_price(tc, class_bid_price, seats_available)
+
+                if offered_price is not None and urgent_wtp >= offered_price:
                     seats_sold[tc] += 1
-                    total_revenue += fare
+                    total_revenue += offered_price
                     bookings_accepted[tc]['urgent'] += 1
                 else:
                     bookings_rejected[tc]['urgent'] += 1
 
-    print("--- SIMULATION COMPLETE ---")
+    print("\n================ SIMULATION COMPLETE ================")
     print(f"\nTotal Revenue (All Classes): ₹{total_revenue:,}")
     
-    print("\n--- CLASS BREAKDOWN ---")
+    print("\n--- FINAL CLASS BREAKDOWN ---")
     for tc in TRAVEL_CLASSES:
+        # Get the very last bid price from Day 1
+        final_bid_price = current_bid_prices.get(tc, 0)
+        final_offered_price = get_offered_price(tc, final_bid_price, 1) 
+        
         print(f"\nClass: {tc}")
         print(f"  Seats Sold: {seats_sold[tc]} / {CAPACITY[tc]}")
-        print(f"  Bid Price:  ₹{bid_prices[tc]:.0f}")
-        print(f"  Leisure:  {bookings_accepted[tc]['leisure']} accepted, {bookings_rejected[tc]['leisure']} rejected (Fare: ₹{PRICES[tc]['leisure']})")
-        print(f"  Urgent:   {bookings_accepted[tc]['urgent']} accepted, {bookings_rejected[tc]['urgent']} rejected (Fare: ₹{PRICES[tc]['urgent']})")
-
-        if bid_prices[tc] > PRICES[tc]['leisure']:
-            print("  ANALYSIS: Bid price was > leisure fare. Model *intentionally* saved seats.")
-        else:
-            print("  ANALYSIS: Bid price was <= leisure fare. Model accepted 'first come, first served'.")
+        print(f"  Final Bid Price (Day 1): ₹{final_bid_price:.0f}")
+        print(f"  Final Offered Price:   ₹{final_offered_price if final_offered_price else 'SOLD OUT'}")
+        
+        print("\n  Customer Segment Analysis:")
+        leisure_fare = PRICES[tc]['leisure']
+        urgent_fare = PRICES[tc]['urgent']
+        print(f"  Leisure (WTP: ₹{leisure_fare}): {bookings_accepted[tc]['leisure']} accepted, {bookings_rejected[tc]['leisure']} rejected")
+        print(f"  Urgent  (WTP: ₹{urgent_fare}):  {bookings_accepted[tc]['urgent']} accepted, {bookings_rejected[tc]['urgent']} rejected")
 
 # --- RUN THE MODEL ---
 if __name__ == "__main__":
-    all_class_bid_prices = run_offline_engine()
-    run_online_simulation(all_class_bid_prices)
+    run_dynamic_simulation() # <-- This is the new main call
