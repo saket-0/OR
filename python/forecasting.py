@@ -1,18 +1,19 @@
-# FILE 2: forecasting.py
+# FILE 2: forecasting.py (UPDATED)
 
 import numpy as np
 
-def forecast_demand(unconstrained_estimates: list, external_factors: dict) -> dict:
+def forecast_demand(unconstrained_estimates: list, 
+                    external_factors: dict, 
+                    demand_factors: dict) -> dict: # <-- ACCEPT NEW ARGUMENT
     """
     Forecasts the demand distribution (mean & std dev) for each fare class.
 
-    This basic model splits the average unconstrained demand and applies
-    external factors (like holidays).
+    This *updated* model applies statistically-derived factors.
 
     Args:
-        unconstrained_estimates: List of true demand estimates from the unconstraining module.
-        external_factors: A dict of causal drivers, e.g.,
-                          {'is_holiday': True, 'day_of_week': 'Fri'}
+        unconstrained_estimates: List of true demand estimates.
+        external_factors: A dict of causal drivers for the *new* train.
+        demand_factors: A dict of calculated factors from historical data.
 
     Returns:
         A forecast dict: {'leisure': {'mu': 150, 'sigma': 30}, 
@@ -23,22 +24,26 @@ def forecast_demand(unconstrained_estimates: list, external_factors: dict) -> di
     # Base mu is the average of our historical true demand
     base_mu = np.mean(unconstrained_estimates)
     
-    # Base split: 70% Leisure, 30% Urgent
+    # Base split: 70% Leisure, 30% Urgent (this could also be in demand_factors)
     forecast = {
         'leisure': {'mu': base_mu * 0.7, 'sigma': base_mu * 0.15},
         'urgent':  {'mu': base_mu * 0.3, 'sigma': base_mu * 0.05}
     }
     
-    # Apply simple causal rules
+    # --- APPLY CALCULATED FACTORS ---
+    # Apply factors based on the *new train's* external_factors
     if external_factors.get('is_holiday'):
-        # Holidays increase urgent demand
-        forecast['urgent']['mu'] *= 1.5
-        forecast['leisure']['mu'] *= 0.8 # Decrease leisure
+        print("... applying holiday factor")
+        # Apply the *calculated* holiday factor
+        forecast['urgent']['mu'] *= demand_factors.get('factor_holiday', 1.0)
+        forecast['leisure']['mu'] *= demand_factors.get('factor_holiday', 1.0)
         
     if external_factors.get('day_of_week') in ['Fri', 'Sun']:
-        # Weekends increase both
-        forecast['urgent']['mu'] *= 1.2
-        forecast['leisure']['mu'] *= 1.1
+        print("... applying weekend factor")
+        # Apply the *calculated* weekend factor
+        forecast['urgent']['mu'] *= demand_factors.get('factor_weekend', 1.0)
+        forecast['leisure']['mu'] *= demand_factors.get('factor_weekend', 1.0)
+    # ---------------------------------
 
     # Clean up by converting to integers
     for k in forecast:

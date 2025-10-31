@@ -1,9 +1,10 @@
-# FILE 4: main_engine.py
+# FILE 4: main_engine.py (UPDATED)
 
 import numpy as np
 from unconstraining import unconstrain_demand
 from forecasting import forecast_demand
 from optimization import calculate_bid_price
+from factor_calculator import calculate_demand_factors # <-- IMPORT NEW MODULE
 
 # --- 1. DEFINE SYSTEM PARAMETERS ---
 
@@ -16,22 +17,27 @@ PRICES = {
     'leisure': 3000
 }
 
-# Causal factors for the train we are pricing
+# Causal factors for the *new* train we are pricing
 EXTERNAL_FACTORS = {
     'is_holiday': True,
     'day_of_week': 'Fri'
 }
 
-# Dummy historical data (from past train runs)
-# 3 trains: 1 sold out 5 days early, 1 sold out 2 days early, 1 didn't sell out
-HISTORICAL_SALES_DATA = [
-    {'train_id': 1, 'days_before_departure': 5, 'total_sold': 200},
-    {'train_id': 2, 'days_before_departure': 2, 'total_sold': 200},
-    {'train_id': 3, 'days_before_departure': 0, 'total_sold': 185}
+# --- UPDATED HISTORICAL DATA ---
+# This data is now more detailed, with tags for holidays/weekends
+# This is the data we learn from.
+DETAILED_HISTORICAL_DATA = [
+    {'train_id': 1, 'total_sold': 200, 'days_early': 5,  'is_holiday': True,  'day_of_week': 'Fri'},
+    {'train_id': 2, 'total_sold': 200, 'days_early': 2,  'is_holiday': False, 'day_of_week': 'Wed'},
+    {'train_id': 3, 'total_sold': 185, 'days_early': 0,  'is_holiday': False, 'day_of_week': 'Mon'},
+    {'train_id': 4, 'total_sold': 200, 'days_early': 10, 'is_holiday': True,  'day_of_week': 'Sun'},
+    {'train_id': 5, 'total_sold': 190, 'days_early': 0,  'is_holiday': False, 'day_of_week': 'Tue'},
+    {'train_id': 6, 'total_sold': 200, 'days_early': 1,  'is_holiday': False, 'day_of_week': 'Fri'},
 ]
 
 
 # --- 2. THE "GATEKEEPER" (Inventory Control Logic) ---
+# (This function is unchanged)
 def should_accept_booking(fare: float, bid_price: float, seats_available: int) -> bool:
     """
     The real-time Bid-Price Control logic.
@@ -52,14 +58,34 @@ def run_offline_engine():
     In reality, this runs once per day to update the price.
     """
     print("--- RUNNING OFFLINE ENGINE ---")
-    estimates = unconstrain_demand(HISTORICAL_SALES_DATA, CAPACITY)
-    forecast = forecast_demand(estimates, EXTERNAL_FACTORS)
+    
+    # --- NEW STEP: Calculate factors from all past data ---
+    demand_factors = calculate_demand_factors(DETAILED_HISTORICAL_DATA, CAPACITY)
+    
+    # Step 1: Unconstrain *just* the most recent data to get a baseline
+    # (Note: The factor calculator already ran this, but we run it
+    # again on all data to get the most up-to-date average)
+    #
+    unconstrained_estimates = [rec['true_demand'] for rec in DETAILED_HISTORICAL_DATA]
+
+    # Step 2: Forecast demand using the *new factors*
+    #
+    forecast = forecast_demand(
+        unconstrained_estimates, 
+        EXTERNAL_FACTORS, 
+        demand_factors # <-- PASS THE FACTORS
+    ) 
+    
+    # Step 3: Optimize
+    #
     bid_price = calculate_bid_price(forecast, PRICES, CAPACITY)
+    
     print("--- OFFLINE ENGINE RUN COMPLETE ---")
     return bid_price
 
 
 # --- 4. RUN THE ONLINE SIMULATION (Simulates the booking window) ---
+# (This function is unchanged)
 def run_online_simulation(bid_price: float):
     """
     Simulates the 30-day booking window using the Bid-Price Gatekeeper.
