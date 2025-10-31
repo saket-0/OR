@@ -1,7 +1,3 @@
-# Basic Revenue Management Engine
-
-This project is a basic, 4-module implementation of an Operations Research-based Revenue Management (RM) engine.
-
 ## Modules
 
 1.  **`unconstraining.py`**: Estimates true demand from censored historical sales data.
