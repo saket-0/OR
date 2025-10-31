@@ -1,17 +1,24 @@
-# FILE 2: forecasting.py (UPDATED for Flexi-Fare)
+# FILE 2: forecasting.py (UPDATED with Price-Elasticity Model)
 
 import numpy as np
 import config
+
+# --- NEW: Elasticity Parameters ---
+# This controls how sensitive demand is to price changes.
+# E > 1.0 = Elastic (demand changes a lot with price)
+# E < 1.0 = Inelastic (demand changes little with price)
+PRICE_ELASTICITY_COEFFICIENT = 1.5 
+
 
 def forecast_demand(unconstrained_estimates: list, 
                     external_factors: dict, 
                     demand_factors: dict,
                     quota_type: str) -> dict:
     """
-    Forecasts the *total* demand distribution for a specific quota.
+    Forecasts the *total potential market* for a specific quota.
     (This function is unchanged)
     """
-    print(f"Step 2: Forecasting *total* demand for {quota_type} quota...")
+    print(f"Step 2: Forecasting *total potential market* for {quota_type} quota...")
     
     # Base mu is the average *total* demand for this quota from history
     base_mu = np.mean(unconstrained_estimates) if unconstrained_estimates else 0
@@ -33,46 +40,55 @@ def forecast_demand(unconstrained_estimates: list,
     forecast['mu'] = int(forecast['mu'])
     forecast['sigma'] = int(forecast['sigma'])
         
-    print(f"Total forecast complete for {quota_type}: {forecast}")
+    print(f"Total potential market forecast for {quota_type}: {forecast}")
     return forecast
 
 
-def get_price_elastic_demand_forecast(total_demand_mu: int, 
-                                      price_buckets: list) -> list:
+def forecast_demand_by_price_point(total_market_mu: int, 
+                                   price_buckets: list) -> list:
     """
-    (MOCK FUNCTION)
-    Simulates a price-elastic demand forecast.
+    (NEW) Simulates a price-elastic demand forecast.
     
-    In a real system, this would be a complex model. Here, we just
-    split the total demand across the buckets using a predefined ratio.
+    This model calculates an *independent* demand forecast for each
+    price point, assuming demand decreases as price increases.
     
     Args:
-        total_demand_mu: The total forecasted demand (e.g., 150).
+        total_market_mu: The total forecasted demand (e.g., 150),
+                         treated as the demand for the *base price*.
         price_buckets: The list of bucket dicts from config.
         
     Returns:
         A list of demand forecasts, one for each bucket.
-        e.g., [100, 30, 20]
+        e.g., [150, 85, 60]
     """
-    num_buckets = len(price_buckets)
+    print(f"... simulating price-elastic demand from market size {total_market_mu}")
     
-    # --- Mock Ratios ---
-    # We assume more demand for cheaper buckets.
-    # These ratios are arbitrary and should be data-driven.
-    if num_buckets == 3:
-        ratios = [0.60, 0.30, 0.10] # 60% of demand for B1, 30% for B2, etc.
-    elif num_buckets == 4:
-        ratios = [0.50, 0.25, 0.15, 0.10]
-    elif num_buckets == 5:
-        ratios = [0.40, 0.25, 0.15, 0.10, 0.10]
-    else:
-        ratios = [1.0 / num_buckets] * num_buckets # Fallback
+    if not price_buckets:
+        return []
+
+    # 1. Get the base price (lowest price, e.g., 1.0x)
+    base_price_bucket = price_buckets[0]
+    base_price = base_price_bucket['price']
     
-    # This is "independent" demand: the demand for *each* bucket
-    # as if it were the only one offered.
-    # For the LP, we need *cumulative* demand, but this is a common
-    # simplification (D_b1 = demand willing to pay P_b1).
-    demand_per_bucket = [int(total_demand_mu * r) for r in ratios]
+    # 2. Assume the total market mu is the demand at the base price
+    # This is a key assumption: D(base_price) = total_market_mu
+    base_demand = total_market_mu
     
-    print(f"... MOCK price-elastic demand: {demand_per_bucket}")
+    demand_per_bucket = []
+    
+    for bucket in price_buckets:
+        current_price = bucket['price']
+        
+        if current_price == base_price:
+            # Demand for the base bucket is the total market
+            demand_per_bucket.append(int(base_demand))
+        else:
+            # 3. Apply a price elasticity formula for higher prices
+            # Formula: Demand(P) = Base_Demand * (Base_Price / P)^E
+            # This is a "constant elasticity" model.
+            price_ratio = base_price / current_price
+            demand = base_demand * (price_ratio ** PRICE_ELASTICITY_COEFFICIENT)
+            demand_per_bucket.append(int(demand))
+
+    print(f"... Price-elastic demand forecast: {demand_per_bucket}")
     return demand_per_bucket
