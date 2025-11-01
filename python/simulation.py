@@ -1,4 +1,4 @@
-# FILE 7: simulation.py (UPDATED for Stochastic/Quiet Mode)
+# FILE 7: simulation.py (UPDATED for Stochastic/Quiet Mode - CORRECTED)
 
 import numpy as np
 import config
@@ -26,6 +26,7 @@ def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = Fal
     
     # --- 1. OFFLINE PHASE: Run Forecasts ---
     # Pass the stochastic_mode flag to the forecasting engine
+    # Note: get_quota_forecasts uses stochastic_mode to set its *own* quiet param
     all_quota_forecasts = get_quota_forecasts(stochastic_mode=stochastic_mode)
     
     # --- 2. OFFLINE PHASE: Run Master Allocation (Quota vs Quota) ---
@@ -36,7 +37,8 @@ def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = Fal
         master_allocations[tc] = partition_capacity_by_quota(
             all_quota_forecasts[tc],
             config.CAPACITY[tc],
-            tc # <-- (NEW) Pass travel class for policy constraints
+            tc, # <-- (NEW) Pass travel class for policy constraints
+            quiet_mode=quiet_mode # <-- (NEW) Pass quiet_mode
         )
     if not quiet_mode:
         print(f"\n--- MASTER ALLOCATIONS COMPLETE: {master_allocations} ---")
@@ -60,14 +62,17 @@ def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = Fal
                     forecast_data['independent_bucket_demands'],
                     forecast_data['prices'],
                     quota_total_allocation,
-                    q_code
+                    q_code,
+                    quiet_mode=quiet_mode # <-- (NEW) Pass quiet_mode
                 )
                 final_bucket_allocations[tc].update(inner_alloc)
             
             elif q_config['type'] == 'FLAT':
                 final_bucket_allocations[tc][f"{q_code}_Bucket_0_Allocation"] = quota_total_allocation
     
+    # --- THIS WAS THE BUGGY LINE ---
     if not quiet_mode:
+    # --- END OF BUG FIX ---
         print(f"\n--- FINAL BUCKET ALLOCATIONS COMPLETE: {final_bucket_allocations} ---")
 
     

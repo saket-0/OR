@@ -1,19 +1,23 @@
-# FILE 3: allocation_engine.py (UPDATED with Policy Constraint)
+# FILE 3: allocation_engine.py (UPDATED with Policy Constraint & Quiet Mode)
 # This module solves the "Master" LP (between quotas)
 # and the "Inner" LP (between buckets).
 
 import pulp
 
+# ===================================================================
+# --- MASTER ALLOCATION LP BETWEEN QUOTAS ---
 def partition_capacity_by_quota(quota_forecasts: dict, 
                                 total_capacity: int,
-                                tc: str) -> dict: # <-- (NEW) Added tc
+                                tc: str,
+                                quiet_mode: bool = False) -> dict: # <-- (NEW) Added quiet_mode
     """
     (NEW) Solves the "Master Allocation" problem.
     
     Decides how many seats to *protect* for each quota based on
     its total demand and average revenue per seat.
     """
-    print(f"--- Solving Master LP for {tc} to partition {total_capacity} seats ---")
+    if not quiet_mode: 
+        print(f"--- Solving Master LP for {tc} to partition {total_capacity} seats ---")
     
     prob = pulp.LpProblem(f"Master_Quota_Allocation_{tc}", pulp.LpMaximize)
     
@@ -48,7 +52,8 @@ def partition_capacity_by_quota(quota_forecasts: dict,
     # Enforce a minimum allocation for social/policy quotas,
     # even if it's not revenue-optimal.
     if 'LD' in q_codes and tc == '3AC':
-        print("... Applying 'LD' Policy Constraint for 3AC (min 2 seats)")
+        if not quiet_mode: 
+            print("... Applying 'LD' Policy Constraint for 3AC (min 2 seats)")
         prob += x_vars['LD'] >= 2, "Policy_Constraint_LD_3AC_Min"
     # --- (END OF NEW) ---
 
@@ -58,7 +63,8 @@ def partition_capacity_by_quota(quota_forecasts: dict,
 
     if pulp.LpStatus[prob.status] != 'Optimal':
         # Don't raise an exception, just warn, as it might be an "empty problem"
-        print(f"WARNING: Master Allocation for {tc} LP status: {pulp.LpStatus[prob.status]}")
+        if not quiet_mode: 
+            print(f"WARNING: Master Allocation for {tc} LP status: {pulp.LpStatus[prob.status]}")
         if pulp.LpStatus[prob.status] == 'Infeasible':
              raise Exception(f"Master Allocation LP for {tc} is INFEASIBLE.")
 
@@ -67,15 +73,20 @@ def partition_capacity_by_quota(quota_forecasts: dict,
     result = {}
     for q in q_codes:
         result[f"{q}_Allocation"] = int(x_vars[q].varValue)
-
-    print(f"Master Allocation complete. Result: {result}")
+    
+    if not quiet_mode: 
+        print(f"Master Allocation complete. Result: {result}")
     return result
 
+# ===================================================================
 
+# ===================================================================
+# --- INNER ALLOCATION LP BETWEEN BUCKETS OF A QUOTA ---
 def partition_quota_into_buckets(independent_demands: list,
                                  prices: list,
                                  quota_allocation: int,
-                                 q_code: str) -> dict:
+                                 q_code: str,
+                                 quiet_mode: bool = False) -> dict: # <-- (NEW) Added quiet_mode
     """
     (NEW) Solves the "Inner Allocation" problem for a single FLEXI quota.
     
@@ -84,13 +95,15 @@ def partition_quota_into_buckets(independent_demands: list,
     """
     # (Benign) If total demand is <= allocation, no LP is needed.
     if sum(independent_demands) <= quota_allocation:
-        print(f"--- Skipping Inner LP for {q_code} (Demand <= Allocation) ---")
+        if not quiet_mode: 
+            print(f"--- Skipping Inner LP for {q_code} (Demand <= Allocation) ---")
         result = {}
         for i in range(len(independent_demands)):
              result[f"{q_code}_Bucket_{i}_Allocation"] = independent_demands[i]
         return result
 
-    print(f"--- Solving Inner LP for {q_code} to partition {quota_allocation} seats ---")
+    if not quiet_mode: 
+        print(f"--- Solving Inner LP for {q_code} to partition {quota_allocation} seats ---")
     
     num_buckets = len(independent_demands)
     prob = pulp.LpProblem(f"Inner_Allocation_{q_code}", pulp.LpMaximize)
@@ -125,7 +138,8 @@ def partition_quota_into_buckets(independent_demands: list,
     # --- 4. Solve the LP ---
     prob.solve(pulp.PULP_CBC_CMD(msg=False)) # Suppress solver console output
     if pulp.LpStatus[prob.status] != 'Optimal':
-        print(f"WARNING: Inner LP for {q_code} failed. Allocating 0 seats.")
+        if not quiet_mode: 
+            print(f"WARNING: Inner LP for {q_code} failed. Allocating 0 seats.")
         return {}
 
     # --- 5. Get the Final Allocation ---
@@ -133,5 +147,8 @@ def partition_quota_into_buckets(independent_demands: list,
     for i in range(num_buckets):
         result[f"{q_code}_Bucket_{i}_Allocation"] = int(x_vars[i].varValue)
 
-    print(f"Inner Allocation complete. Result: {result}")
+    if not quiet_mode: 
+        print(f"Inner Allocation complete. Result: {result}")
     return result
+
+# ===================================================================

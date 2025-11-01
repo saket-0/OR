@@ -27,7 +27,7 @@ FLEXI_FARE_STRUCTURE = {
         {'name': 'Bucket_2 (1.1x)', 'price': 1980},
         {'name': 'Bucket_3 (1.2x)', 'price': 2160},
         {'name': 'Bucket_4 (1.3x)', 'price': 2340},
-        {'name': 'Bucket_5 (1.4x)', 'price': 2500}, # Capped price
+        {'name': 'Bucket_5 (1.4x)', 'price': 2500}, # Capped price for 3AC
     ]
 }
 
