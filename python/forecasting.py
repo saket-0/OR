@@ -13,14 +13,13 @@ def forecast_demand(unconstrained_estimates: list,
                     quota_type: str,
                     quiet: bool = False) -> dict: # <-- (NEW)
     """
-    Forecasts the *total potential market* for a specific quota.
-    (This function is unchanged)
+    Forecasts the total potential market for a specific quota.
     """
     if not quiet:
         print(f"\nStep 2: Forecasting *total potential market* for {quota_type} quota...")
     
     base_mu = np.mean(unconstrained_estimates) if unconstrained_estimates else 0
-    # (FIX) Ensure sigma is non-zero, e.g., 15% of mu or a fallback
+    # Ensure sigma is non-zero, e.g., 15% of mu or a fallback
     base_sigma = base_mu * 0.15 if base_mu > 0 else 1.0 
     forecast = {'mu': base_mu, 'sigma': base_sigma}
     
@@ -35,7 +34,7 @@ def forecast_demand(unconstrained_estimates: list,
         forecast['mu'] *= demand_factors.get('factor_weekend', 1.0)
     
     forecast['mu'] = int(forecast['mu'])
-    # (NEW) Also scale sigma by the same factors
+    # Also scale sigma by the same factors
     forecast['sigma'] = int(forecast['mu'] * 0.15) 
         
     if not quiet:
@@ -47,7 +46,7 @@ def forecast_demand_by_price_point(total_market_mu: int,
                                    price_buckets: list,
                                    quiet: bool = False) -> (list, list): # <-- (NEW)
     """
-    (UPDATED) Simulates a price-elastic CUMULATIVE demand forecast for FLEXI quotas.
+    Simulates a price-elastic CUMULATIVE demand forecast for FLEXI quotas.
     
     Returns:
         A tuple of (cumulative_demand_list, price_list)
@@ -82,7 +81,7 @@ def get_flat_price_demand_forecast(total_market_mu: int,
                                    price: int,
                                    quiet: bool = False) -> (list, list): # <-- (NEW)
     """
-    (NEW) Formats the demand for a FLAT price quota.
+    Formats the demand for a FLAT price quota.
     
     Returns:
         A tuple of (cumulative_demand_list, price_list)

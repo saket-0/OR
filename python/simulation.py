@@ -1,10 +1,10 @@
-# FILE 7: simulation.py (UPDATED for Stochastic/Quiet Mode - CORRECTED)
+# FILE 7: simulation.py (UPDATED for Stochastic/Quiet Mode)
 
 import numpy as np
 import config
 from engine import get_quota_forecasts 
 from allocation_engine import partition_capacity_by_quota, partition_quota_into_buckets
-# (NEW) Import both curves
+# Import both curves
 from booking_curve_model import GENERAL_PICKUP_CURVE, LADIES_PICKUP_CURVE
 
 def _get_or_initialize_key(data_dict, key, default_val=0):
@@ -26,7 +26,7 @@ def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = Fal
     
     # --- 1. OFFLINE PHASE: Run Forecasts ---
     # Pass the stochastic_mode flag to the forecasting engine
-    # Note: get_quota_forecasts uses stochastic_mode to set its *own* quiet param
+    # Note: get_quota_forecasts uses stochastic_mode to set its own quiet param
     all_quota_forecasts = get_quota_forecasts(stochastic_mode=stochastic_mode)
     
     # --- 2. OFFLINE PHASE: Run Master Allocation (Quota vs Quota) ---
@@ -37,13 +37,13 @@ def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = Fal
         master_allocations[tc] = partition_capacity_by_quota(
             all_quota_forecasts[tc],
             config.CAPACITY[tc],
-            tc, # <-- (NEW) Pass travel class for policy constraints
-            quiet_mode=quiet_mode # <-- (NEW) Pass quiet_mode
+            tc, # <-- Pass travel class for policy constraints
+            quiet_mode=quiet_mode # <-- Pass quiet_mode
         )
     if not quiet_mode:
         print(f"\n--- MASTER ALLOCATIONS COMPLETE: {master_allocations} ---")
     
-    # --- 3. (NEW) OFFLINE PHASE: Run Inner Allocation (Bucket vs Bucket) ---
+    # --- 3. OFFLINE PHASE: Run Inner Allocation (Bucket vs Bucket) ---
     final_bucket_allocations = {}
     if not quiet_mode:
         print("\n--- RUNNING INNER ALLOCATION ENGINE (Bucket vs. Bucket) ---")
@@ -63,16 +63,16 @@ def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = Fal
                     forecast_data['prices'],
                     quota_total_allocation,
                     q_code,
-                    quiet_mode=quiet_mode # <-- (NEW) Pass quiet_mode
+                    quiet_mode=quiet_mode # <-- Pass quiet_mode
                 )
                 final_bucket_allocations[tc].update(inner_alloc)
             
             elif q_config['type'] == 'FLAT':
                 final_bucket_allocations[tc][f"{q_code}_Bucket_0_Allocation"] = quota_total_allocation
     
-    # --- THIS WAS THE BUGGY LINE ---
+    # --- THIS WAS THE HELL LINE MAN ---
     if not quiet_mode:
-    # --- END OF BUG FIX ---
+    # --- END OF BUG FIX --- NICE NICE
         print(f"\n--- FINAL BUCKET ALLOCATIONS COMPLETE: {final_bucket_allocations} ---")
 
     
@@ -117,7 +117,7 @@ def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = Fal
                     daily_arrivals = np.random.poisson(avg_arrivals)
 
                 elif q_code == 'LD':
-                    # (NEW) Use the Ladies quota booking curve
+                    # Use the Ladies quota booking curve
                     percent_sold_today = LADIES_PICKUP_CURVE.get(day, 1.0)
                     percent_sold_tmrw = LADIES_PICKUP_CURVE.get(day - 1, 1.0)
                     percent_to_book_this_day = percent_sold_tmrw - percent_sold_today
@@ -198,5 +198,5 @@ def run_dynamic_simulation(stochastic_mode: bool = False, quiet_mode: bool = Fal
                 if num_rejected > 0:
                     print(f"  {q_code}: {num_rejected} rejected")
     
-    # --- (NEW) Return the final revenue for Monte Carlo analysis ---
+    # --- Return the final revenue for Monte Carlo analysis ---
     return total_revenue

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projected Annual Impact</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            display: grid;
+            place-items: center;
+            min-height: 95vh;
+            background-color: #f0f2f5; /* Light grey background */
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .chart-wrapper {
+            background-color: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08); /* Softer shadow */
+            padding: 30px;
+            max-width: 900px; /* Wider for a line chart */
+            width: 100%;
+        }
+
+        /* --- STYLES FOR THE CHART ITSELF --- */
+        
+        /* Main Title */
+        .apexcharts-title-text {
+            font-size: 24px !important;
+            font-weight: 700 !important;
+            color: #333333 !important; /* Match Python color */
+            padding: 10px;
+        }
+
+        /* Axis labels and titles */
+        .apexcharts-xaxis-label, .apexcharts-yaxis-label {
+            font-size: 13px;
+            color: #555;
+        }
+        .apexcharts-xaxis-title-text, .apexcharts-yaxis-title-text {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* Tooltip */
+        .apexcharts-tooltip {
+            border-radius: 8px !important;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important;
+            padding: 10px 15px !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="chart-wrapper">
+        <div id="impactChart"></div>
+    </div>
+
+    <script>
+        // --- Parameters from Python script ---
+        const trains_per_day = 13000;
+        const days_per_year = 365;
+        const base_revenue = 800000; // per train (₹)
+        const points = 100; // Number of points on the line
+
+        // --- Function to generate chart data ---
+        function generateChartData() {
+            const dataSeries = [];
+            const scaling_factor = base_revenue * trains_per_day * days_per_year * 0.20;
+
+            for (let i = 0; i <= points; i++) {
+                // x-value: % increase (0 to 20)
+                const increase_percent = (i / points) * 20;
+
+                // y-value: Calculate annual increase
+                const annual_increase = (
+                    (1 - Math.exp(-increase_percent / 6)) * scaling_factor
+                );
+
+                // Convert to ₹ billion
+                const annual_increase_billion = annual_increase / 1e9;
+
+                dataSeries.push({
+                    x: increase_percent,
+                    y: annual_increase_billion
+                });
+            }
+            return dataSeries;
+        }
+
+        const chartData = generateChartData();
+
+        // --- ApexCharts Configuration ---
+        const options = {
+            series: [{
+                name: 'Projected Annual Gain',
+                data: chartData
+            }],
+            
+            chart: {
+                type: 'area',
+                height: 450,
+                fontFamily: 'Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif',
+                toolbar: {
+                    show: true,
+                    tools: {
+                        download: true,
+                        selection: true,
+                        zoom: true,
+                        zoomin: true,
+                        zoomout: true,
+                        pan: true,
+                        reset: true
+                    },
+                    autoSelected: 'zoom'
+                },
+                animations: {
+                    enabled: true,
+                    easing: 'easeout',
+                    speed: 800
+                }
+            },
+            
+            title: {
+                text: 'Projected Annual Impact of ORBIT on Indian Railways',
+                align: 'center',
+                margin: 20,
+                style: {
+                    fontSize: '22px',
+                    fontWeight: 'bold',
+                    color: '#333333'
+                },
+            },
+            
+            // --- FIX IS HERE: Disable dataLabels ---
+            dataLabels: {
+                enabled: false // This will remove the numbers on the line
+            },
+            // --- END FIX ---
+
+            stroke: {
+                curve: 'smooth',
+                width: 4,
+                colors: ["#1f77b4"]
+            },
+
+            fill: {
+                type: 'solid',
+                opacity: 0.1,
+                colors: ["#1f77b4"]
+            },
+            
+            xaxis: {
+                type: 'numeric',
+                min: 0,
+                max: 20,
+                tickAmount: 10,
+                title: {
+                    text: 'Average Revenue Increase per Train (%)',
+                    style: {
+                        fontSize: '14px',
+                        fontWeight: 600
+                    }
+                },
+                labels: {
+                    formatter: (value) => { return value.toFixed(0) + '%'; }
+                }
+            },
+            
+            yaxis: {
+                min: 0,
+                title: {
+                    text: 'Annual Gain (₹ Billion)',
+                    style: {
+                        fontSize: '14px',
+                        fontWeight: 600
+                    }
+                },
+                labels: {
+                    formatter: (value) => { return '₹' + value.toFixed(1) + 'B'; }
+                }
+            },
+            
+            grid: {
+                borderColor: '#cccccc',
+                strokeDashArray: 4
+            },
+            
+            tooltip: {
+                x: {
+                    formatter: (value) => { return value.toFixed(2) + '% Increase'; }
+                },
+                y: {
+                    formatter: (value) => { return '₹' + value.toFixed(2) + ' Billion Gain'; }
+                },
+                marker: {
+                    show: false
+                }
+            },
+            
+            legend: {
+                position: 'top',
+                horizontalAlign: 'left',
+                fontSize: '13px',
+                markers: {
+                    radius: 12,
+                }
+            }
+        };
+
+        const chart = new ApexCharts(document.querySelector("#impactChart"), options);
+        chart.render();
+    </script>
+
+</body>
+</html>

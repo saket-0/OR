@@ -2,7 +2,7 @@
 # This module solves the "Master" LP (between quotas)
 # and the "Inner" LP (between buckets).
 
-import pulp
+import pulp # Function to solve the LLP problems
 
 # ===================================================================
 # --- MASTER ALLOCATION LP BETWEEN QUOTAS ---
@@ -11,9 +11,9 @@ def partition_capacity_by_quota(quota_forecasts: dict,
                                 tc: str,
                                 quiet_mode: bool = False) -> dict: # <-- (NEW) Added quiet_mode
     """
-    (NEW) Solves the "Master Allocation" problem.
+    Solves the "Master Allocation" problem.
     
-    Decides how many seats to *protect* for each quota based on
+    Decides how many seats to protect for each quota based on
     its total demand and average revenue per seat.
     """
     if not quiet_mode: 
@@ -23,19 +23,24 @@ def partition_capacity_by_quota(quota_forecasts: dict,
     
     q_codes = list(quota_forecasts.keys())
     
-    # --- 1. Define Decision Variables ---
+
+
+
+    # --- 1. Defining Decision Variables ---
     # x_q = How many seats to allocate to Quota q
     x_vars = pulp.LpVariable.dicts(
         "Allocation", q_codes, lowBound=0, cat='Continuous'
     )
 
-    # --- 2. Define Objective Function ---
+    # --- 2. Defining Objective Function ---
     # Maximize (AvgRev_GN * Alloc_GN) + (AvgRev_TK * Alloc_TK) + ...
     prob += pulp.lpSum(
         [quota_forecasts[q]['avg_revenue_per_seat'] * x_vars[q] for q in q_codes]
     ), "Total_Expected_Revenue"
 
-    # --- 3. Define Constraints ---
+
+
+    # --- 3. Defining Constraints ---
     
     # 1. Capacity Constraint: We can't allocate more than our total capacity
     prob += pulp.lpSum(x_vars) <= total_capacity, "Capacity_Constraint"
@@ -48,14 +53,15 @@ def partition_capacity_by_quota(quota_forecasts: dict,
             f"Demand_Constraint_{q}"
         )
 
-    # --- 3b. (NEW) POLICY CONSTRAINT ---
+    # --- 3b. POLICY CONSTRAINT ---
     # Enforce a minimum allocation for social/policy quotas,
     # even if it's not revenue-optimal.
     if 'LD' in q_codes and tc == '3AC':
         if not quiet_mode: 
             print("... Applying 'LD' Policy Constraint for 3AC (min 2 seats)")
         prob += x_vars['LD'] >= 2, "Policy_Constraint_LD_3AC_Min"
-    # --- (END OF NEW) ---
+
+
 
     # --- 4. Solve the LP ---
     # Suppress solver console output
@@ -88,7 +94,7 @@ def partition_quota_into_buckets(independent_demands: list,
                                  q_code: str,
                                  quiet_mode: bool = False) -> dict: # <-- (NEW) Added quiet_mode
     """
-    (NEW) Solves the "Inner Allocation" problem for a single FLEXI quota.
+    Solves the "Inner Allocation" problem for a single FLEXI quota.
     
     Takes the total seats allocated to a quota (e.g., 84 for GN) and
     partitions them optimally among its own price buckets.
@@ -109,7 +115,7 @@ def partition_quota_into_buckets(independent_demands: list,
     prob = pulp.LpProblem(f"Inner_Allocation_{q_code}", pulp.LpMaximize)
     
     # --- 1. Define Decision Variables ---
-    # x_i = How many tickets to *sell* in Bucket i
+    # x_i = How many tickets to sell in Bucket i
     x_vars = [
         pulp.LpVariable(f"{q_code}_Bucket_{i}", lowBound=0, cat='Continuous')
         for i in range(num_buckets)
@@ -141,6 +147,8 @@ def partition_quota_into_buckets(independent_demands: list,
         if not quiet_mode: 
             print(f"WARNING: Inner LP for {q_code} failed. Allocating 0 seats.")
         return {}
+
+
 
     # --- 5. Get the Final Allocation ---
     result = {}

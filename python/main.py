@@ -1,5 +1,5 @@
 # FILE 8: main.py (MODIFIED for Streamlit - CORRECTED)
-# This file can now be run directly OR imported by app.py
+# This file can now be run directly OR imported by app.py --> NICE 
 
 import numpy as np
 from simulation import run_dynamic_simulation

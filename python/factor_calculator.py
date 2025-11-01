@@ -7,7 +7,7 @@ def get_unconstrained_demand(historical_data: list, capacity: int, quiet: bool =
     """
     Helper function to run unconstraining on the new detailed data format.
     """
-    # Create the simple list format required by the original unconstraining function
+    # Creating the simple list format required by the original unconstraining function
     simple_sales_data = [
         {
             'train_id': rec['train_id'], 
@@ -38,7 +38,7 @@ def calculate_demand_factors(historical_data: list, capacity: int, quiet: bool =
     for i, record in enumerate(historical_data):
         record['true_demand'] = true_demand_list[i]
 
-    # --- (FIXED LOGIC) ---
+    # --- (LOGIC) ---
     # 3. Calculate an overall average to use as a safe fallback
     #    (Use 1.0 to avoid division by zero if true_demand_list is empty)
     overall_mu = np.mean(true_demand_list) if true_demand_list else 1.0
@@ -64,7 +64,7 @@ def calculate_demand_factors(historical_data: list, capacity: int, quiet: bool =
         if rec['day_of_week'] in ['Fri', 'Sun'] and not rec['is_holiday'] # Avoid double-counting
     ]
     avg_weekend_mu = np.mean(weekend_demand) if weekend_demand else base_mu
-    # --- (END OF FIX) ---
+    # --- (END) ---
 
     # 7. Calculate Factors
     factor_holiday = (avg_holiday_mu / base_mu) if base_mu > 0 else 1.0

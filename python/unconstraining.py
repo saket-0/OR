@@ -12,7 +12,7 @@ def unconstrain_demand(historical_sales: list, capacity: int, quiet: bool = Fals
     """
     Estimates true (unconstrained) demand from historical sales data.
 
-    This *refined* heuristic uses an exponential compounding factor,
+    This refined heuristic uses an exponential compounding factor,
     assuming that demand "spills" and compounds each day.
 
     Args:
@@ -20,7 +20,7 @@ def unconstrain_demand(historical_sales: list, capacity: int, quiet: bool = Fals
                           [{'train_id': 1, 'days_before_departure': 3, 'total_sold': 200},
                            {'train_id': 2, 'days_before_departure': 0, 'total_sold': 180}]
         capacity: The total seat capacity (e.g., 200).
-        quiet: If True, suppresses print statements.
+        quiet: If True, suppresses print statements. -->> Just does not print the line, making the function quieter.
 
     Returns:
         A list of unconstrained demand estimates.

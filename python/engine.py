@@ -1,7 +1,7 @@
 # FILE 4: engine.py (UPDATED for Stochastic Mode)
 # This file's job is *only* to forecast total demand.
 
-import numpy as np # <-- (NEW) For stochastic sampling
+import numpy as np # <-- For stochastic sampling
 from forecasting import (
     forecast_demand, 
     forecast_demand_by_price_point,
@@ -24,14 +24,14 @@ def _convert_cumulative_to_independent_demand(cumulative_demand: list) -> list:
     return independent_demand
 
 
-def get_quota_forecasts(stochastic_mode: bool = False): # <-- (NEW)
+def get_quota_forecasts(stochastic_mode: bool = False): # <-- For stochastic sampling
     """
-    (NEW) Runs "End-of-Horizon" forecasts for ALL quotas to get
+    Runs "End-of-Horizon" forecasts for ALL quotas to get
     their total demand and expected revenue potential.
     
     This is the main "offline" process.
     
-    (NEW) Args:
+    Args:
         stochastic_mode: If True, samples demand from a normal distribution
                          instead of using the fixed mean (mu).
     """
@@ -72,13 +72,13 @@ def get_quota_forecasts(stochastic_mode: bool = False): # <-- (NEW)
                  total_market_mu = 10 
                  total_market_sigma = total_market_mu * 0.15 # Assign a sigma
 
-            # --- (NEW) STOCHASTIC MODE LOGIC ---
+            # --- STOCHASTIC MODE LOGIC ---
             if stochastic_mode:
                 # Sample the total market demand from its distribution
                 sampled_mu = np.random.normal(total_market_mu, total_market_sigma)
                 # Ensure demand is non-negative
                 total_market_mu = max(0, int(sampled_mu))
-            # --- (END OF NEW) ---
+            # --- (END) ---
 
             cumulative_demand_total = []
             prices = []
@@ -98,7 +98,7 @@ def get_quota_forecasts(stochastic_mode: bool = False): # <-- (NEW)
                 cumulative_demand_total
             )
             
-            # (NEW) Calculate total demand and avg revenue for the master allocator
+            # Calculate total demand and avg revenue for the master allocator
             total_demand = sum(independent_demand_total)
             max_revenue = sum(
                 independent_demand_total[i] * prices[i] for i in range(len(prices))

@@ -14,6 +14,7 @@ def _generate_general_pickup_curve(window_days: int) -> dict:
         - key = day (e.g., 120, 119, ... 1)
         - value = cumulative % of tickets *sold* by the *start* of that day.
     """
+
     curve = {}
     gn_window_len = float(window_days)
     
@@ -28,7 +29,7 @@ def _generate_general_pickup_curve(window_days: int) -> dict:
 
 def _generate_ladies_pickup_curve(window_days: int) -> dict:
     """
-    (NEW) Simulates a "bimodal" (U-shaped) pick-up curve
+    Simulates a "bimodal" (U-shaped) pick-up curve
     for the Ladies Quota (LD).
     
     Assumes:

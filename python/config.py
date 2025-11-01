@@ -31,7 +31,7 @@ FLEXI_FARE_STRUCTURE = {
     ]
 }
 
-# --- 2. (NEW) Quota Configuration ---
+# --- 2. Quota Configuration ---
 # Defines all quotas, their price model, and booking window.
 QUOTA_CONFIG = {
     'GN': {

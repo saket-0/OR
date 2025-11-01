@@ -21,12 +21,12 @@ except ImportError as e:
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Railway Revenue Management Simulation",
+    page_title="ORBIT",
     page_icon="🚂",
     layout="wide"
 )
 
-st.title("🚂 Advanced Railway Revenue Management")
+st.title("🚂 ORBIT")
 st.markdown("Monte Carlo Simulation & Optimization Engine")
 
 # --- Initialize Session State ---
@@ -95,7 +95,7 @@ if st.session_state.results:
         # --- THIS IS THE FIX ---
         # I have removed the 'height=210' parameter from this container
         with st.container(border=True):
-        # --- END OF FIX ---
+        # --- END OF FIX ---  
             st.metric("Standard Deviation", 
                       f"₹{results['std_dev']:,.2f}",
                       help="Measures the volatility/risk. Higher is riskier.")
