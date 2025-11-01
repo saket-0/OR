@@ -1,4 +1,5 @@
 # This is your new frontend file: OR/app.py
+# (UPDATED for a 2-column layout and better alignment)
 
 import streamlit as st
 import matplotlib.pyplot as plt
@@ -29,7 +30,6 @@ st.title("🚂 Advanced Railway Revenue Management")
 st.markdown("Monte Carlo Simulation & Optimization Engine")
 
 # --- Initialize Session State ---
-# This holds variables so they don't reset
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'running' not in st.session_state:
@@ -42,29 +42,23 @@ if st.button("🚀 Run Full Monte Carlo Simulation",
     st.session_state.running = True
     st.session_state.results = None
     
-    # Create a progress bar and a status text element
     status_text = st.empty()
     progress_bar = st.progress(0)
     
     final_results = None
     
-    # Use st.spinner to show a global "running" message
     with st.spinner("Initializing Simulation... This may take a minute."):
         
-        # Call the generator function from main.py
-        n_sims = 1 # Start at 1
+        n_sims = 1 
         for i, status in enumerate(run_analysis()):
             
-            # Check if it's the final results dictionary
             if isinstance(status, dict):
                 final_results = status
                 n_sims = final_results.get('n_simulations', 100)
                 break
             
-            # Update progress
             status_text.text(status)
-            # Estimate progress
-            progress = (i + 1) / (3 + (100 // 10)) # 3 setup steps + 10 progress updates
+            progress = (i + 1) / (3 + (100 // 10)) 
             progress_bar.progress(min(1.0, progress))
 
     st.session_state.running = False
@@ -82,51 +76,61 @@ if st.session_state.results:
     st.header(f"Monte Carlo Analysis ({n_sims} Runs)")
     st.markdown("---")
 
-    # --- 1. Key Metrics ---
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Baseline (Deterministic) Revenue", 
-                f"₹{results['baseline_revenue']:,.2f}",
-                help="Revenue from a single run assuming perfect forecasts.")
-    
-    col2.metric("Average (Mean) Revenue", 
-                f"₹{results['mean_revenue']:,.2f}",
-                help="The most realistic expected revenue from all stochastic runs.")
-    
-    col3.metric("Standard Deviation", 
-                f"₹{results['std_dev']:,.2f}",
-                help="Measures the volatility/risk. Higher is riskier.")
-    
-    col4, col5 = st.columns(2)
-    col4.metric("Min Revenue (Worst Case)", 
-                f"₹{results['min_revenue']:,.2f}")
-    col5.metric("Max Revenue (Best Case)", 
-                f"₹{results['max_revenue']:,.2f}")
+    # --- Create a 2-column layout ---
+    # Give the left column 1/3 of the space and the right 2/3
+    col1, col2 = st.columns([1, 2])
 
-    # --- 2. Revenue Distribution Chart ---
-    st.subheader("Revenue Distribution (Histogram)")
+    with col1:
+        # --- 1. Key Metrics (Stacked in the left column) ---
+        st.subheader("Summary Metrics")
+
+        with st.container(border=True):
+            st.metric("Baseline (Deterministic) Revenue", 
+                      f"₹{results['baseline_revenue']:,.2f}",
+                      help="Revenue from a single run assuming perfect forecasts.")
+            
+            st.metric("Average (Mean) Revenue", 
+                      f"₹{results['mean_revenue']:,.2f}",
+                      help="The most realistic expected revenue from all stochastic runs.")
+
+        with st.container(border=True, height=210):
+            st.metric("Standard Deviation", 
+                      f"₹{results['std_dev']:,.2f}",
+                      help="Measures the volatility/risk. Higher is riskier.")
+            
+            st.metric("Min Revenue (Worst Case)", 
+                      f"₹{results['min_revenue']:,.2f}")
+            
+            st.metric("Max Revenue (Best Case)", 
+                      f"₹{results['max_revenue']:,.2f}")
+
+    with col2:
+        # --- 2. Revenue Distribution Chart (In the right column) ---
+        st.subheader("Revenue Distribution (Histogram)")
+        
+        # Create a histogram with a smaller, more controlled size
+        fig, ax = plt.subplots(figsize=(8, 4.8)) # <--- MUCH SMALLER FIGSIZE
+        ax.hist(results['all_revenues'], bins=30, edgecolor='black', alpha=0.7)
+        
+        # Add vertical lines for key metrics
+        ax.axvline(results['baseline_revenue'], color='red', linestyle='--', linewidth=2, 
+                    label=f'Baseline (₹{results["baseline_revenue"]:,.0f})')
+        ax.axvline(results['mean_revenue'], color='green', linestyle='-', linewidth=2, 
+                    label=f'Mean (₹{results["mean_revenue"]:,.0f})')
+        
+        ax.set_title(f'Distribution of Revenue over {n_sims} Simulations')
+        ax.set_xlabel('Total Revenue (₹)')
+        ax.set_ylabel('Frequency')
+        ax.legend()
+        
+        # Display the chart in Streamlit
+        st.pyplot(fig)
     
-    # Create a histogram using Matplotlib
-    fig, ax = plt.subplots()
-    ax.hist(results['all_revenues'], bins=30, edgecolor='black', alpha=0.7)
+    st.markdown("---")
     
-    # Add vertical lines for key metrics
-    ax.axvline(results['baseline_revenue'], color='red', linestyle='--', linewidth=2, 
-                label=f'Baseline (₹{results["baseline_revenue"]:,.0f})')
-    ax.axvline(results['mean_revenue'], color='green', linestyle='-', linewidth=2, 
-                label=f'Mean (₹{results["mean_revenue"]:,.0f})')
-    
-    ax.set_title(f'Distribution of Revenue over {n_sims} Simulations')
-    ax.set_xlabel('Total Revenue (₹)')
-    ax.set_ylabel('Frequency')
-    ax.legend()
-    
-    # Display the chart in Streamlit
-    st.pyplot(fig)
-    
-    # --- 3. Detailed Log from Baseline Run ---
+    # --- 3. Detailed Log (Full Width Below) ---
     st.subheader("Detailed Log (from Deterministic Baseline Run)")
     with st.expander("Click to view the full simulation log"):
-        # Display the captured print output in a code block
         st.code(results['deterministic_log'], language='text')
 
 elif not st.session_state.running:
