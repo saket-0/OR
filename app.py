@@ -1,5 +1,5 @@
 # This is your new frontend file: OR/app.py
-# (UPDATED for a 2-column layout and better alignment)
+# (CORRECTED to remove scrolling on metric box)
 
 import streamlit as st
 import matplotlib.pyplot as plt
@@ -77,7 +77,6 @@ if st.session_state.results:
     st.markdown("---")
 
     # --- Create a 2-column layout ---
-    # Give the left column 1/3 of the space and the right 2/3
     col1, col2 = st.columns([1, 2])
 
     with col1:
@@ -93,7 +92,10 @@ if st.session_state.results:
                       f"₹{results['mean_revenue']:,.2f}",
                       help="The most realistic expected revenue from all stochastic runs.")
 
-        with st.container(border=True, height=210):
+        # --- THIS IS THE FIX ---
+        # I have removed the 'height=210' parameter from this container
+        with st.container(border=True):
+        # --- END OF FIX ---
             st.metric("Standard Deviation", 
                       f"₹{results['std_dev']:,.2f}",
                       help="Measures the volatility/risk. Higher is riskier.")
@@ -108,11 +110,9 @@ if st.session_state.results:
         # --- 2. Revenue Distribution Chart (In the right column) ---
         st.subheader("Revenue Distribution (Histogram)")
         
-        # Create a histogram with a smaller, more controlled size
-        fig, ax = plt.subplots(figsize=(8, 4.8)) # <--- MUCH SMALLER FIGSIZE
+        fig, ax = plt.subplots(figsize=(8, 4.8)) 
         ax.hist(results['all_revenues'], bins=30, edgecolor='black', alpha=0.7)
         
-        # Add vertical lines for key metrics
         ax.axvline(results['baseline_revenue'], color='red', linestyle='--', linewidth=2, 
                     label=f'Baseline (₹{results["baseline_revenue"]:,.0f})')
         ax.axvline(results['mean_revenue'], color='green', linestyle='-', linewidth=2, 
@@ -123,7 +123,6 @@ if st.session_state.results:
         ax.set_ylabel('Frequency')
         ax.legend()
         
-        # Display the chart in Streamlit
         st.pyplot(fig)
     
     st.markdown("---")
